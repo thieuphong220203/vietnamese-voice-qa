@@ -165,3 +165,41 @@ AdvancedML/
 7. **Quản lý weights**: Pretrained weights tải từ Hugging Face / Model Hub; checkpoint tự huấn luyện lưu riêng và chọn qua YAML.
 8. **Môi trường tính toán**: Google Colab được sử dụng làm compute runner; dữ liệu lớn có thể liên kết qua Google Drive.
 9. **Phân tách trách nhiệm**: `pipeline.py` chỉ điều phối luồng thực thi; UI/App gọi pipeline thay vì gọi trực tiếp model ML.
+
+---
+
+## Phase 1: Mock Pipeline
+
+Skeleton hiện tại chạy toàn bộ luồng bằng mock component, không tải model hoặc
+checkpoint thật:
+
+```text
+pipeline.yaml
+  -> factory của từng module
+  -> VAD -> Separation -> Enhancement -> ASR -> QA -> TTS
+  -> PipelineResult
+```
+
+Cài dependency nhẹ và chạy demo với audio giả lập:
+
+```bash
+pip install -r requirements.txt
+python scripts/run_pipeline.py
+```
+
+Chạy với WAV PCM và ghi audio output:
+
+```bash
+python scripts/run_pipeline.py --input path/to/input.wav --output outputs/audio/mock.wav
+```
+
+Chạy test:
+
+```bash
+pytest -q
+```
+
+Để thay model sau này, implement interface trong `base.py`, đăng ký wrapper ở
+`factory.py`, rồi đổi `name` và `params` trong `configs/pipeline.yaml`. Pipeline
+không chứa preprocessing riêng cho bất kỳ model nào; tensor conversion,
+resampling bắt buộc hoặc tokenizer của model phải nằm trong wrapper tương ứng.

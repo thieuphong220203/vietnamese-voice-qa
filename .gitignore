@@ -1,0 +1,68 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments & Packaging
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Pytest / Coverage / Linter
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Environment variables & secrets
+.env
+*.env
+*.pem
+*.key
+
+# ==========================================
+# Data, Checkpoints & Outputs (Large Files)
+# ==========================================
+
+# Model checkpoints (ignore large weights, keep folder structure)
+checkpoints/**
+!checkpoints/**/.gitkeep
+
+# Datasets (ignore raw & processed audio files, keep folder structure)
+data/raw/**
+!data/raw/**/.gitkeep
+data/processed/**
+!data/processed/**/.gitkeep
+
+# Experiment outputs (ignore generated audio, logs, metrics)
+outputs/audio/**
+!outputs/audio/**/.gitkeep
+outputs/logs/**
+!outputs/logs/**/.gitkeep
+outputs/metrics/**
+!outputs/metrics/**/.gitkeep
+
+# Hugging Face / Torch cache if downloaded locally
+.cache/
+hf_cache/

@@ -1,0 +1,37 @@
+version: 1
+
+# Phase 1 intentionally uses only deterministic local mock components.
+components:
+  vad:
+    name: mock
+    params:
+      emit_speech: true
+
+  separation:
+    name: mock
+    params:
+      source_count: 1
+
+  enhancement:
+    name: mock
+    params: {}
+
+  asr:
+    name: mock
+    params:
+      transcript: "Xin chào, đây là câu hỏi thử nghiệm."
+
+  qa:
+    name: mock
+    params:
+      response_template: "Đây là câu trả lời giả lập cho: {question}"
+
+  tts:
+    name: mock
+    params:
+      sample_rate: 16000
+      seconds_per_character: 0.02
+      minimum_duration_seconds: 0.1
+
+pipeline:
+  transcript_separator: " "
