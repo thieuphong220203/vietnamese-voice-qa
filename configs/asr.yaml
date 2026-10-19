@@ -1,0 +1,6 @@
+name: phowhisper
+
+params:
+  model_id: vinai/PhoWhisper-small
+  device: auto
+  dtype: auto

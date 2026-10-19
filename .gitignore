@@ -54,6 +54,9 @@ data/raw/**
 !data/raw/**/.gitkeep
 data/processed/**
 !data/processed/**/.gitkeep
+data/samples/**/*.wav
+data/samples/**/*.mp3
+data/samples/**/*.flac
 
 # Experiment outputs (ignore generated audio, logs, metrics)
 outputs/audio/**

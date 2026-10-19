@@ -17,9 +17,11 @@ components:
     params: {}
 
   asr:
-    name: mock
+    name: phowhisper
     params:
-      transcript: "Xin chào, đây là câu hỏi thử nghiệm."
+      model_id: vinai/PhoWhisper-small
+      device: auto
+      dtype: auto
 
   qa:
     name: mock

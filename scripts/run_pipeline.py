@@ -58,3 +58,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+#python scripts\run_pipeline.py --input data\samples\fleurs_vi\audio\sample_000.wav
