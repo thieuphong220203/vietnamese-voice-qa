@@ -170,16 +170,23 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
         title="Vietnamese Voice Assistant",
         theme=gr.themes.Soft(),
     ) as app:
-        gr.Markdown(
-            """
-            # Vietnamese Voice Assistant
-            Upload hoặc thu âm tiếng Việt, sau đó chạy toàn bộ pipeline
-            **VAD → Separation → Enhancement → ASR → QA → TTS**.
-
-            Các component mock sẽ tự được thay thế khi bạn đổi model trong
-            `configs/pipeline.yaml`; giao diện không cần gọi model trực tiếp.
-            """
-        )
+        with gr.Row():
+            with gr.Column(scale=8):
+                gr.Markdown(
+                    """
+                    # 🎙️ Vietnamese Voice Assistant
+                    Upload hoặc thu âm tiếng Việt, sau đó chạy toàn bộ pipeline
+                    **VAD → Separation → Enhancement → ASR → QA → TTS**.
+                    """
+                )
+            with gr.Column(scale=2, min_width=140):
+                theme_btn = gr.Button("🌓 Giao diện Tối/Sáng", size="sm")
+                theme_btn.click(
+                    fn=None,
+                    inputs=None,
+                    outputs=None,
+                    js="() => { document.body.classList.toggle('dark'); }",
+                )
 
         with gr.Row():
             with gr.Column(scale=1):
