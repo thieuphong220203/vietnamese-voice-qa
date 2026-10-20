@@ -44,6 +44,24 @@ class PhoWhisperRecognizer(SpeechRecognizer):
             torch_dtype=self.torch_dtype,
         )
 
+        # original_torch_load = torch.load
+
+        # try:
+        #     def compatible_torch_load(*args, **kwargs):
+        #         kwargs["weights_only"] = False
+        #         return original_torch_load(*args, **kwargs)
+
+        #     torch.load = compatible_torch_load
+
+        #     self.processor = AutoProcessor.from_pretrained(self.model_id)
+
+        #     self.model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        #         self.model_id,
+        #         dtype=self.torch_dtype,
+        #     )
+        # finally:
+        #     torch.load = original_torch_load
+
         self.model.to(self.device)
         self.model.eval()
 

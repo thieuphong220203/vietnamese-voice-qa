@@ -4,202 +4,252 @@ Hệ thống xử lý âm thanh và hỏi đáp giọng nói tiếng Việt (End
 
 ---
 
-## 📁 Cấu Trúc Thư Mục (Project Structure)
+## 1. Tổng Quan Kiến Trúc
+
+Hệ thống hoạt động theo luồng xử lý pipeline nối tiếp:
+
+```text
+Input Audio -> VAD -> Speech Separation -> Speech Enhancement -> ASR -> QA -> TTS -> Output Audio
+```
+
+- VAD (Voice Activity Detection): Phát hiện các đoạn có tiếng nói và loại bỏ khoảng lặng.
+- Speech Separation: Tách riêng từng giọng nói khi có nhiều người nói đồng thời.
+- Speech Enhancement: Khử nhiễu môi trường, làm sạch tín hiệu tiếng nói.
+- ASR (Automatic Speech Recognition): Nhận dạng giọng nói và chuyển thành văn bản (PhoWhisper).
+- QA (Question Answering): Tiếp nhận câu hỏi dạng văn bản và sinh câu trả lời (Qwen / LLM).
+- TTS (Text-to-Speech): Chuyển văn bản câu trả lời thành âm thanh nói tự nhiên.
+
+---
+
+## 2. Cấu Trúc Thư Mục
 
 ```text
 AdvancedML/
-│
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
 │
 ├── configs/
-│   ├── pipeline.yaml
-│   ├── enhancement.yaml
-│   ├── separation.yaml
-│   ├── asr.yaml
-│   ├── qa.yaml
-│   └── tts.yaml
+│   ├── pipeline.yaml          # Cấu hình pipeline tổng end-to-end
+│   ├── asr.yaml               # Cấu hình riêng cho module ASR
+│   ├── enhancement.yaml       # Cấu hình riêng cho Speech Enhancement
+│   ├── separation.yaml        # Cấu hình riêng cho Speech Separation
+│   ├── qa.yaml                # Cấu hình riêng cho QA / LLM
+│   └── tts.yaml               # Cấu hình riêng cho TTS
 │
 ├── src/
-│   ├── audio/
-│   │   ├── types.py
-│   │   ├── loader.py
-│   │   └── preprocessing.py
-│   │
-│   ├── enhancement/
-│   │   ├── base.py
-│   │   ├── factory.py
-│   │   ├── deepfilternet.py
-│   │   ├── metricgan.py
-│   │   ├── train.py
-│   │   ├── infer.py
-│   │   └── evaluate.py
-│   │
-│   ├── separation/
-│   │   ├── base.py
-│   │   ├── factory.py
-│   │   ├── sepformer.py
-│   │   ├── train.py
-│   │   ├── infer.py
-│   │   └── evaluate.py
-│   │
-│   ├── asr/
-│   │   ├── base.py
-│   │   ├── factory.py
-│   │   ├── phowhisper.py
-│   │   ├── whisper.py
-│   │   ├── train.py
-│   │   ├── infer.py
-│   │   └── evaluate.py
-│   │
-│   ├── qa/
-│   │   ├── base.py
-│   │   ├── factory.py
-│   │   ├── qwen.py
-│   │   ├── train.py
-│   │   ├── infer.py
-│   │   └── evaluate.py
-│   │
-│   ├── tts/
-│   │   ├── base.py
-│   │   ├── factory.py
-│   │   ├── viettts.py
-│   │   ├── train.py
-│   │   ├── infer.py
-│   │   └── evaluate.py
-│   │
-│   ├── vad/
-│   │   ├── base.py
-│   │   ├── factory.py
-│   │   └── silero.py
-│   │
-│   ├── data/
-│   │   ├── audio_utils.py
-│   │   ├── prepare_enhancement.py
-│   │   └── prepare_separation.py
-│   │
-│   └── pipeline/
-│       └── pipeline.py
+│   ├── audio/                 # Xử lý audio dùng chung (AudioData, loader, preprocessing)
+│   ├── asr/                   # Module ASR (base, factory, phowhisper, whisper, mock, infer, evaluate)
+│   ├── enhancement/           # Module Speech Enhancement (base, factory, deepfilternet, metricgan)
+│   ├── separation/            # Module Speech Separation (base, factory, sepformer)
+│   ├── qa/                    # Module Question Answering (base, factory, qwen, mock)
+│   ├── tts/                   # Module Text-to-Speech (base, factory, viettts, mock)
+│   ├── vad/                   # Module VAD (base, factory, silero, mock)
+│   ├── data/                  # Code chuẩn bị và tổng hợp dataset
+│   └── pipeline/              # Logic điều phối toàn bộ pipeline (pipeline.py)
 │
 ├── scripts/
-│   ├── train.py
-│   ├── evaluate.py
-│   ├── run_pipeline.py
-│   └── download_data.py
-│
-├── notebooks/
-│   └── runner.ipynb
-│
-├── checkpoints/
-│   ├── enhancement/
-│   ├── separation/
-│   ├── asr/
-│   ├── qa/
-│   └── tts/
-│
-├── data/
-│   ├── raw/
-│   │   ├── vivos/
-│   │   ├── musan/
-│   │   └── fleurs/
-│   ├── processed/
-│   │   ├── enhancement/
-│   │   └── separation/
-│   └── metadata/
-│
-├── outputs/
-│   ├── audio/
-│   ├── metrics/
-│   └── logs/
+│   ├── download_fleurs_samples.py   # Tải audio mẫu tiếng Việt từ tập FLEURS
+│   ├── run_pipeline.py              # Chạy pipeline end-to-end từ dòng lệnh
+│   ├── train.py                     # Entry point huấn luyện chung
+│   ├── evaluate.py                  # Entry point đánh giá chung
+│   └── download_data.py             # Script hỗ trợ tải dataset lớn
 │
 ├── app/
-│   ├── main.py
-│   └── ui.py
+│   ├── main.py                # Entry point khởi chạy web app
+│   └── ui.py                  # Giao diện Gradio
 │
-└── tests/
+├── notebooks/
+│   └── runner.ipynb           # Notebook chạy thực nghiệm trên Google Colab
+│
+├── checkpoints/               # Lưu trữ weights/checkpoints do quá trình train tạo ra
+├── data/                      # Dataset (raw, processed, samples, metadata)
+├── outputs/                   # Kết quả sinh ra khi chạy (audio, metrics, logs)
+└── tests/                     # Unit tests và integration tests
 ```
 
 ---
 
-## 💡 Ý Nghĩa Các Thư Mục & Thành Phần
+## 3. Ý Nghĩa Các Thư Mục và Thành Phần
 
-- **`configs/`**: Chọn model, checkpoint, tham số huấn luyện và inference mà không cần sửa code.
-  - `pipeline.yaml`: Cấu hình toàn bộ hệ thống end-to-end (VAD, Separation, Enhancement, ASR, QA, TTS).
-  - `enhancement.yaml`, `separation.yaml`, `asr.yaml`, `qa.yaml`, `tts.yaml`: Cấu hình chi tiết cho từng task riêng biệt.
-- **`src/<module>/`**: Code triển khai thực tế của từng module.
-  - `base.py`: Interface / abstract class chung cho model trong module.
-  - `factory.py`: Khởi tạo model tương ứng dựa theo YAML configuration.
-  - `<model>.py`: Wrapper cho từng model cụ thể (DeepFilterNet, MetricGAN, PhoWhisper, Qwen, VietTTS, Silero VAD,...).
-  - `train.py`: Logic huấn luyện / fine-tuning độc lập.
-  - `infer.py`: Chạy inference / dự đoán độc lập.
-  - `evaluate.py`: Đánh giá chất lượng và tính toán metric.
-- **`src/audio/`**: Định nghĩa types, loader và preprocessing dùng chung cho toàn bộ luồng audio.
-- **`src/data/`**: Chuẩn bị dataset, tổng hợp nhiễu, trộn giọng nói cho enhancement & separation.
-- **`src/pipeline/pipeline.py`**: Ghép nối các module thành luồng end-to-end:
-  $$\text{Input Audio} \rightarrow \text{VAD} \rightarrow \text{Separation} \rightarrow \text{Enhancement} \rightarrow \text{ASR} \rightarrow \text{QA} \rightarrow \text{TTS} \rightarrow \text{Output Audio}$$
-- **`scripts/`**: Entry points để chạy các tác vụ từ dòng lệnh hoặc Google Colab (`train.py`, `evaluate.py`, `run_pipeline.py`, `download_data.py`).
-- **`notebooks/runner.ipynb`**: Notebook chạy thực nghiệm trên Google Colab.
-- **`checkpoints/`**: Lưu trữ weights/checkpoints do quá trình train/fine-tune tạo ra.
-- **`data/`**: Chứa dataset raw (`vivos`, `musan`, `fleurs`), processed và metadata.
-- **`outputs/`**: Chứa output audio sinh ra, file metrics và log thực nghiệm.
-- **`app/`**: Giao diện ứng dụng demo (`main.py`, `ui.py`).
-- **`tests/`**: Unit test và integration test cho source code.
+### configs/
+Chứa toàn bộ file cấu hình định dạng YAML. Mục tiêu là thay đổi model, checkpoint, thiết bị tính toán (CPU/CUDA) hoặc siêu tham số mà không cần sửa code Python:
+- `pipeline.yaml`: Cấu hình toàn bộ luồng end-to-end. Chọn model nào cho từng module: VAD, Separation, Enhancement, ASR, QA, TTS.
+- `asr.yaml`, `enhancement.yaml`, `separation.yaml`, `qa.yaml`, `tts.yaml`: Cấu hình chi tiết riêng cho từng task độc lập.
+
+### src/<module>/
+Chứa mã nguồn triển khai thực tế của từng tác vụ ML. Mỗi module tuân theo cấu trúc chuẩn hóa:
+- `base.py`: Interface / abstract class chung. Quy định phương thức bắt buộc mà mọi model trong module phải có (ví dụ ASR bắt buộc có `transcribe(audio)`).
+- `factory.py`: Đọc tên model từ file YAML và khởi tạo đúng class tương ứng (Factory Pattern).
+- `<model>.py`: Wrapper cho từng model cụ thể (như `phowhisper.py`, `deepfilternet.py`, `qwen.py`). Chịu trách nhiệm tải pretrained weights, chuyển đổi tensor và chạy inference.
+- `mock.py`: Mô hình giả lập nhẹ dùng để test thông suốt toàn bộ hệ thống mà không cần tải model nặng hay GPU.
+- `train.py`: Logic huấn luyện / fine-tuning độc lập cho module.
+- `infer.py`: Chạy suy luận độc lập trên file âm thanh mới.
+- `evaluate.py`: Đánh giá chất lượng mô hình trên tập dữ liệu kiểm thử (tính toán WER, CER, RTF, PESQ, STOI,...).
+
+### src/audio/
+Xử lý dữ liệu âm thanh dùng chung trong toàn bộ hệ thống:
+- `types.py`: Định nghĩa kiểu dữ liệu `AudioData` và `SpeechSegment` (mẫu âm thanh, sample rate, số kênh channels, thời lượng duration).
+- `loader.py`: Đọc và ghi file WAV sang định dạng `AudioData` chuẩn nội bộ.
+- `preprocessing.py`: Các bước tiền xử lý âm thanh chung (resampling, chuyển Stereo sang Mono, chuẩn hóa biên độ).
+
+### src/data/
+Chuẩn bị dữ liệu phục vụ huấn luyện và đánh giá:
+- `audio_utils.py`: Tiện ích cắt, ghép, chuẩn hóa âm thanh.
+- `prepare_enhancement.py`: Tổng hợp cặp âm thanh nhiễu / sạch (noisy/clean pairs) để train enhancement.
+- `prepare_separation.py`: Trộn các giọng nói đơn lẻ thành đoạn audio hỗn hợp (mixture) để train separation.
+
+### src/pipeline/pipeline.py
+Điều phối toàn bộ luồng hoạt động từ đầu đến cuối. Đọc cấu hình từ `pipeline.yaml` và gọi factory của từng module để kết nối các bước xử lý lại với nhau. Pipeline không chứa logic riêng của bất kỳ mô hình cụ thể nào.
+
+### scripts/
+Các entry point dòng lệnh phục vụ việc chạy nhanh từ terminal hoặc Google Colab:
+- `download_fleurs_samples.py`: Tải các mẫu audio tiếng Việt chuẩn từ Google FLEURS để kiểm thử nhanh.
+- `run_pipeline.py`: Chạy toàn bộ pipeline end-to-end trên một file audio bất kỳ.
+- `train.py`, `evaluate.py`: Điều hướng tới script huấn luyện hoặc đánh giá của từng module tương ứng.
+
+### app/
+Tầng ứng dụng demo giao diện người dùng:
+- `ui.py`: Xây dựng giao diện web bằng Gradio (khung thu âm mic, upload file, bảng kết quả, chuyển đổi giao diện Sáng/Tối).
+- `main.py`: Khởi chạy web server, tự động nhận diện môi trường Google Colab để sinh public link chia sẻ.
+
+### checkpoints/
+Lưu trữ trọng số (weights) mô hình do quá trình train / fine-tune của dự án sinh ra. Pretrained weights từ Hugging Face được tự động lưu trong cache.
+
+### data/
+Chứa dữ liệu sử dụng trong dự án:
+- `raw/`: Dataset gốc chưa qua xử lý (VIVOS, MUSAN, FLEURS).
+- `processed/`: Dataset đã qua xử lý hoặc tổng hợp cho enhancement và separation.
+- `samples/`: Các mẫu âm thanh nhỏ phục vụ kiểm thử nhanh module ASR.
+- `metadata/`: Các file CSV/JSON mô tả đường dẫn, transcript, speaker ID, SNR.
+
+### outputs/
+Lưu trữ kết quả đầu ra khi chạy thực nghiệm:
+- `audio/`: File âm thanh sinh ra sau khi khử nhiễu, tách giọng hoặc tổng hợp giọng nói.
+- `metrics/`: Kết quả đánh giá mô hình (file CSV lưu WER, CER, RTF,...).
+- `logs/`: Nhật ký thực nghiệm và huấn luyện.
+
+### tests/
+Chứa các bài kiểm thử tự động (unit tests, integration tests) đảm bảo code luôn hoạt động đúng khi có thay đổi.
 
 ---
 
-## 📐 Project Design Principles
+## 4. Cài Đặt Môi Trường
 
-1. **Tính độc lập**: Mỗi tác vụ ML là một module độc lập.
-2. **Khả năng kiểm thử & phát triển riêng biệt**: Từng module có thể train, fine-tune, infer và evaluate riêng biệt.
-3. **Decoupling**: Pipeline end-to-end không phụ thuộc cứng vào bất kỳ model implementation cụ thể nào.
-4. **Cấu hình hóa**: Việc lựa chọn model và tham số được điều khiển hoàn toàn qua YAML configuration.
-5. **Cấu trúc chuẩn hóa cho mỗi module**:
-   - `base.py`: common interface
-   - `factory.py`: select/create model
-   - `<model_name>.py`: model-specific wrapper
-   - `train.py`: training / fine-tuning
-   - `infer.py`: inference
-   - `evaluate.py`: evaluation
-6. **Dễ mở rộng**: Khi thêm model mới, chỉ cần thêm wrapper model, đăng ký vào `factory.py` và cấu hình trong YAML mà không cần sửa pipeline chính.
-7. **Quản lý weights**: Pretrained weights tải từ Hugging Face / Model Hub; checkpoint tự huấn luyện lưu riêng và chọn qua YAML.
-8. **Môi trường tính toán**: Google Colab được sử dụng làm compute runner; dữ liệu lớn có thể liên kết qua Google Drive.
-9. **Phân tách trách nhiệm**: `pipeline.py` chỉ điều phối luồng thực thi; UI/App gọi pipeline thay vì gọi trực tiếp model ML.
-
----
-
-## Phase 1: Mock Pipeline
-
-Skeleton hiện tại chạy toàn bộ luồng bằng mock component, không tải model hoặc
-checkpoint thật:
-
-```text
-pipeline.yaml
-  -> factory của từng module
-  -> VAD -> Separation -> Enhancement -> ASR -> QA -> TTS
-  -> PipelineResult
-```
-
-Cài dependency nhẹ và chạy demo với audio giả lập:
+Cài đặt các thư viện phụ thuộc:
 
 ```bash
 pip install -r requirements.txt
-python scripts/run_pipeline.py
 ```
 
-Chạy với WAV PCM và ghi audio output:
+---
+
+## 5. Tải Dữ Liệu Mẫu Để Kiểm Thử (Sample Audio)
+
+Sử dụng script sau để tải các mẫu âm thanh tiếng Việt chuẩn từ dataset Google FLEURS:
 
 ```bash
-python scripts/run_pipeline.py --input path/to/input.wav --output outputs/audio/mock.wav
+# Mặc định tải 20 mẫu về data/samples/fleurs_vi/
+python scripts/download_fleurs_samples.py
+
+# Hoặc tùy chọn số lượng mẫu cần tải (ví dụ 5 mẫu)
+python scripts/download_fleurs_samples.py --count 5
 ```
 
-Chạy test:
+Kết quả tải về bao gồm:
+- Thư mục audio: `data/samples/fleurs_vi/audio/` (chứa các file `.wav`)
+- File metadata: `data/samples/fleurs_vi/metadata.csv` (chứa transcript chuẩn tương ứng để đối chiếu)
+
+---
+
+## 6. Hướng Dẫn Chạy Từng Module Độc Lập
+
+Mỗi module trong thư mục `src/` đều có thể chạy suy luận và đánh giá độc lập:
+
+### Module ASR (Speech-to-Text - PhoWhisper)
+
+1. **Chạy suy luận trên 1 file âm thanh bất kỳ (Inference):**
+
+```bash
+python -m src.asr.infer --audio data/samples/fleurs_vi/audio/sample_000.wav
+```
+
+Có thể chỉ định file cấu hình khác:
+```bash
+python -m src.asr.infer --audio path/to/file.wav --config configs/asr.yaml
+```
+
+2. **Chay đánh giá chất lượng trên tập dữ liệu (Evaluation):**
+
+Đánh giá tự động độ chính xác bằng các chỉ số WER (Word Error Rate), CER (Character Error Rate) và RTF (Real-Time Factor):
+
+```bash
+# Đánh giá trên toàn bộ mẫu trong metadata.csv
+python -m src.asr.evaluate
+
+# Đánh giá giới hạn số lượng mẫu (ví dụ 5 mẫu đầu tiên)
+python -m src.asr.evaluate --limit 5
+
+# Chỉ định file lưu kết quả chi tiết
+python -m src.asr.evaluate --metadata data/samples/fleurs_vi/metadata.csv --output outputs/metrics/asr_evaluation.csv
+```
+
+---
+
+## 7. Hướng Dẫn Chạy Pipeline End-to-End
+
+Chạy toàn bộ luồng xử lý từ audio đầu vào đến âm thanh phản hồi:
+
+```bash
+# Chạy pipeline với file audio đầu vào
+python scripts/run_pipeline.py --input data/samples/fleurs_vi/audio/sample_000.wav
+
+# Chạy và lưu file âm thanh câu trả lời ra đĩa
+python scripts/run_pipeline.py --input data/samples/fleurs_vi/audio/sample_000.wav --output outputs/audio/response.wav
+```
+
+Pipeline đọc cấu hình từ `configs/pipeline.yaml`. Các module đang trong quá trình phát triển sẽ tự động sử dụng component `mock` để hệ thống luôn chạy thông suốt.
+
+---
+
+## 8. Hướng Dẫn Chạy Giao Diện Web (Gradio App)
+
+Giao diện web hỗ trợ ghi âm trực tiếp qua microphone, tải lên file WAV, chọn mẫu audio có sẵn, xem transcript nhận dạng, câu trả lời và chuyển đổi giao diện Sáng / Tối.
+
+### Chạy trên máy cục bộ (Local)
+
+```bash
+python app/main.py
+```
+
+Mở trình duyệt và truy cập:
+```text
+http://127.0.0.1:7860
+```
+
+### Chạy trên Google Colab hoặc chia sẻ link ra ngoài (Public Link)
+
+```bash
+python app/main.py --share
+```
+
+Hệ thống sẽ tạo đường link public `https://xxxx.gradio.live` để truy cập từ xa. Trên Google Colab, app tự động kích hoạt tính năng này.
+
+---
+
+## 9. Chạy Unit Tests
+
+Kiểm tra tính đúng đắn của toàn bộ pipeline và các thành phần:
 
 ```bash
 pytest -q
 ```
 
-Để thay model sau này, implement interface trong `base.py`, đăng ký wrapper ở
-`factory.py`, rồi đổi `name` và `params` trong `configs/pipeline.yaml`. Pipeline
-không chứa preprocessing riêng cho bất kỳ model nào; tensor conversion,
-resampling bắt buộc hoặc tokenizer của model phải nằm trong wrapper tương ứng.
+---
+
+## 10. Nguyên Tắc Thiết Kế Hệ Thống
+
+1. **Tính độc lập**: Mỗi tác vụ ML là một module độc lập (có thể train, fine-tune, infer và evaluate riêng biệt).
+2. **Khử ghép nối (Decoupling)**: Pipeline tổng không gọi trực tiếp model cụ thể nào mà điều phối thông qua interface `base.py` và `factory.py`.
+3. **Cấu hình hóa qua YAML**: Mọi thay đổi về lựa chọn model, thiết bị tính toán (CPU/CUDA), checkpoint hoặc tham số đều được điều khiển qua thư mục `configs/`, không can thiệp vào mã nguồn.
+4. **Tách biệt tầng ứng dụng**: Giao diện người dùng (`app/`) chỉ tương tác với `pipeline.run(audio)`, không gọi trực tiếp các mô hình ML bên dưới.
