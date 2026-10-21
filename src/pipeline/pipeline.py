@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,29 @@ class PipelineResult:
     separated_sources: tuple[AudioData, ...]
     enhanced_sources: tuple[AudioData, ...]
     trace: tuple[StageTrace, ...]
+
+@dataclass(frozen=True, slots=True)
+class StreamUpdate:
+    transcript: str
+    answer: str
+    audio_chunk: AudioData | None = None
+
+
+def _take_phrase(buffer: str) -> tuple[str, str] | None:
+    """Lấy một câu đã hoàn chỉnh; tránh gửi từng token lẻ vào TTS."""
+    for index, char in enumerate(buffer):
+        if char in ".!?\n":
+            phrase = buffer[: index + 1].strip()
+            if phrase:
+                return phrase, buffer[index + 1 :].lstrip()
+
+    # Câu quá dài mà chưa có dấu kết thúc: ngắt ở khoảng trắng.
+    if len(buffer) >= 120:
+        split_at = buffer.rfind(" ", 0, 120)
+        if split_at > 0:
+            return buffer[:split_at].strip(), buffer[split_at + 1 :]
+
+    return None
 
 
 class VoiceQAPipeline:
@@ -137,3 +160,53 @@ class VoiceQAPipeline:
             enhanced_sources=enhanced,
             trace=trace,
         )
+    
+    def stream(self, audio: AudioData) -> Iterator[StreamUpdate]:
+        """Stream câu trả lời và audio, giữ nguyên run() cũ."""
+
+        segments = tuple(self.vad.detect(audio))
+        separated = tuple(
+            source
+            for segment in segments
+            for source in self.separator.separate(segment.audio)
+        )
+        enhanced = tuple(self.enhancer.enhance(source) for source in separated)
+        transcript_parts = tuple(
+            text
+            for source in enhanced
+            if (text := self.asr.transcribe(source).strip())
+        )
+        transcript = self.transcript_separator.join(transcript_parts)
+
+        yield StreamUpdate(transcript=transcript, answer="")
+
+        answer = ""
+        pending = ""
+
+        for fragment in self.qa.stream_answer(transcript):
+            if not fragment:
+                continue
+
+            answer += fragment
+            pending += fragment
+            yield StreamUpdate(transcript=transcript, answer=answer)
+
+            while (ready := _take_phrase(pending)) is not None:
+                phrase, pending = ready
+                for chunk in self.tts.stream_synthesize(phrase):
+                    if chunk.frame_count:
+                        yield StreamUpdate(
+                            transcript=transcript,
+                            answer=answer,
+                            audio_chunk=chunk,
+                        )
+
+        # Đọc nốt phần cuối nếu Qwen không kết thúc bằng dấu câu.
+        if pending.strip():
+            for chunk in self.tts.stream_synthesize(pending.strip()):
+                if chunk.frame_count:
+                    yield StreamUpdate(
+                        transcript=transcript,
+                        answer=answer,
+                        audio_chunk=chunk,
+                    )

@@ -11,6 +11,9 @@ import numpy as np
 
 from src.audio import AudioData
 from src.pipeline import VoiceQAPipeline
+import io
+import soundfile as sf
+from collections.abc import Iterator
 
 
 AudioInput: TypeAlias = tuple[int, np.ndarray] | None
@@ -159,12 +162,99 @@ def run_pipeline(
         error_message = f"{type(error).__name__}: {error}"
         return "", "", None, [], f"❌ **{error_message}**"
 
+def _wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
+    """Đóng gói một phần audio thành WAV để Gradio phát."""
+    with io.BytesIO() as buffer:
+        sf.write(
+            buffer,
+            np.clip(samples, -1.0, 1.0),
+            sample_rate,
+            format="WAV",
+            subtype="PCM_16",
+        )
+        return buffer.getvalue()
+
+
+def run_pipeline_stream(
+    audio_input: AudioInput,
+    pipeline: VoiceQAPipeline,
+) -> Iterator[tuple[str, str, bytes | None | object, str]]:
+    started_at = time.perf_counter()
+
+    try:
+        audio = _to_audio_data(audio_input)
+
+        # Xóa kết quả audio của lượt trước.
+        yield "", "", None, "⏳ Đang nhận dạng và tạo câu trả lời..."
+
+        buffered: list[np.ndarray] = []
+        buffered_frames = 0
+        sample_rate: int | None = None
+        first_audio_at: float | None = None
+        transcript = ""
+        answer = ""
+
+        for update in pipeline.stream(audio):
+            transcript = update.transcript
+            answer = update.answer
+
+            if update.audio_chunk is None:
+                yield transcript, answer, gr.skip(), "⏳ Đang tạo câu trả lời..."
+                continue
+
+            chunk = update.audio_chunk
+            if chunk.channels != 1:
+                raise ValueError("Streaming audio phải là mono")
+
+            if sample_rate is None:
+                sample_rate = chunk.sample_rate
+            elif chunk.sample_rate != sample_rate:
+                raise ValueError("Sample rate thay đổi giữa các audio chunk")
+
+            buffered.append(np.asarray(chunk.samples, dtype=np.float32))
+            buffered_frames += chunk.frame_count
+
+            # Gom khoảng 1 giây audio trước khi gửi để phát mượt hơn.
+            if buffered_frames >= sample_rate:
+                wav = _wav_bytes(np.concatenate(buffered), sample_rate)
+                buffered.clear()
+                buffered_frames = 0
+
+                if first_audio_at is None:
+                    first_audio_at = time.perf_counter()
+
+                yield transcript, answer, wav, "🔊 Đang phát câu trả lời..."
+
+        # Gửi phần audio còn lại.
+        if buffered and sample_rate is not None:
+            wav = _wav_bytes(np.concatenate(buffered), sample_rate)
+            if first_audio_at is None:
+                first_audio_at = time.perf_counter()
+            yield transcript, answer, wav, "🔊 Đang phát câu trả lời..."
+
+        elapsed = time.perf_counter() - started_at
+        if first_audio_at is None:
+            status = f"✅ Hoàn tất trong {elapsed:.2f} giây; không có audio đầu ra."
+        else:
+            first_delay = first_audio_at - started_at
+            status = (
+                f"✅ Hoàn tất trong {elapsed:.2f} giây · "
+                f"Audio đầu tiên sau {first_delay:.2f} giây"
+            )
+
+        yield transcript, answer, gr.skip(), status
+
+    except Exception as error:
+        yield "", "", gr.skip(), f"❌ {type(error).__name__}: {error}"
 
 def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
     """Build the UI around one reusable pipeline instance."""
 
     def submit(audio_input: AudioInput, progress: gr.Progress = gr.Progress()):
         return run_pipeline(audio_input, pipeline, progress)
+    
+    def submit_stream(audio_input: AudioInput):
+        yield from run_pipeline_stream(audio_input, pipeline)
 
     with gr.Blocks(
         title="Vietnamese Voice Assistant",
@@ -202,9 +292,14 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
                         "Chạy pipeline",
                         variant="primary",
                     )
+
+                    stream_button = gr.Button("Chạy streaming")
+
                     clear_button = gr.ClearButton(
                         value="Xóa kết quả",
                     )
+
+                    
 
                 status = gr.Markdown(
                     "Sẵn sàng. Model đã được load khi app khởi động."
@@ -227,6 +322,14 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
                 label="Audio trả lời (TTS)",
                 interactive=False,
             )
+
+            stream_audio = gr.Audio(
+                label="Audio streaming",
+                streaming=True,
+                autoplay=True,
+                interactive=False,
+            )
+            stream_status = gr.Markdown("")
             trace = gr.Dataframe(
                 headers=["Stage", "Inputs", "Outputs", "Seconds"],
                 datatype=["str", "number", "number", "number"],
@@ -249,6 +352,15 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
             show_progress="full",
             concurrency_limit=1,
             api_name="run_pipeline",
+        )
+
+        stream_button.click(
+            fn=submit_stream,
+            inputs=[audio_input],
+            outputs=[transcript, answer, stream_audio, stream_status],
+            show_progress="minimal",
+            concurrency_limit=1,
+            api_name="run_pipeline_stream",
         )
 
         # Mẫu âm thanh tiếng Việt có sẵn để người dùng test nhanh
