@@ -1,0 +1,10 @@
+type: qwen
+
+model_id: Qwen/Qwen2.5-1.5B-Instruct
+device: auto
+max_new_tokens: 128
+
+system_prompt: >-
+  Bạn là một trợ lý hội thoại bằng tiếng Việt.
+  Hãy trả lời chính xác, rõ ràng và ngắn gọn.
+  Không lặp lại câu hỏi của người dùng.
