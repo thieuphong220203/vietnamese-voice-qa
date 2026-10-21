@@ -252,7 +252,7 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
 
     def submit(audio_input: AudioInput, progress: gr.Progress = gr.Progress()):
         return run_pipeline(audio_input, pipeline, progress)
-    
+
     def submit_stream(audio_input: AudioInput):
         yield from run_pipeline_stream(audio_input, pipeline)
 
@@ -299,7 +299,7 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
                         value="Xóa kết quả",
                     )
 
-                    
+
 
                 status = gr.Markdown(
                     "Sẵn sàng. Model đã được load khi app khởi động."

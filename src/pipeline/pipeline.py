@@ -149,7 +149,7 @@ class VoiceQAPipeline:
             StageTrace("enhancement", len(separated), len(enhanced), t3 - t2),
             StageTrace("asr", len(enhanced), len(transcript_parts), t4 - t3),
             StageTrace("qa", 1, 1, t5 - t4),
-            StageTrace("tts", 1, 1, t6 - t5),   
+            StageTrace("tts", 1, 1, t6 - t5),
         )
         return PipelineResult(
             transcript=transcript,
@@ -160,7 +160,7 @@ class VoiceQAPipeline:
             enhanced_sources=enhanced,
             trace=trace,
         )
-    
+
     def stream(self, audio: AudioData) -> Iterator[StreamUpdate]:
         """Stream câu trả lời và audio, giữ nguyên run() cũ."""
 

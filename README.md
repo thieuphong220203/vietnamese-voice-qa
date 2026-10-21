@@ -220,13 +220,15 @@ python scripts/run_pipeline.py --input data/samples/fleurs_vi/audio/sample_000.w
 python scripts/run_pipeline.py --input data/samples/fleurs_vi/audio/sample_000.wav --output outputs/audio/response.wav
 ```
 
-Pipeline đọc cấu hình từ `configs/pipeline.yaml`. Cấu hình hiện tại dùng PhoWhisper, Qwen và VieNeu; VAD, Separation và Enhancement vẫn dùng mock. Giao diện hiện xử lý từng lượt nói rồi mới phát audio trả lời. `stream_synthesize()` đã sẵn sàng cho giao diện streaming sau này.
+Pipeline đọc cấu hình từ `configs/pipeline.yaml`. Cấu hình hiện tại dùng PhoWhisper, Qwen và VieNeu; VAD, Separation và Enhancement vẫn dùng mock. Giao diện có chế độ chạy thường và streaming đầu ra: Qwen trả chữ dần, VieNeu tạo audio theo từng phần. Đầu vào vẫn cần thu âm xong rồi mới xử lý.
 
 ---
 
 ## 8. Hướng Dẫn Chạy Giao Diện Web (Gradio App)
 
-Giao diện web hỗ trợ ghi âm trực tiếp qua microphone, tải lên file WAV, chọn mẫu audio có sẵn, xem transcript nhận dạng, câu trả lời và chuyển đổi giao diện Sáng / Tối.
+Giao diện web hỗ trợ ghi âm trực tiếp qua microphone, tải lên file WAV, chọn mẫu audio có sẵn, xem transcript nhận dạng, câu trả lời và chuyển đổi giao diện Sáng / Tối. Nút **Chạy pipeline** hiển thị trace từng module; nút **Chạy streaming** phát audio theo từng phần và hiển thị thời gian tới audio đầu tiên (chưa có trace riêng).
+
+Chế độ streaming cần chương trình **FFmpeg** trên `PATH` (kiểm tra bằng `ffmpeg -version`). Chỉ cài thư viện Python trong `requirements.txt` là chưa đủ cho phần phát audio streaming của Gradio.
 
 ### Chạy trên máy cục bộ (Local)
 
