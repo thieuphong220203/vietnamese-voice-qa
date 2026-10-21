@@ -16,7 +16,7 @@ Input Audio -> VAD -> Speech Separation -> Speech Enhancement -> ASR -> QA -> TT
 - Speech Separation: Tách riêng từng giọng nói khi có nhiều người nói đồng thời.
 - Speech Enhancement: Khử nhiễu môi trường, làm sạch tín hiệu tiếng nói.
 - ASR (Automatic Speech Recognition): Nhận dạng giọng nói và chuyển thành văn bản (PhoWhisper).
-- QA (Question Answering): Tiếp nhận câu hỏi dạng văn bản và sinh câu trả lời (Qwen / LLM).
+- QA (Question Answering): Tiếp nhận câu hỏi dạng văn bản và sinh câu trả lời (Qwen2.5-1.5B-Instruct).
 - TTS (Text-to-Speech): Chuyển văn bản câu trả lời thành âm thanh nói tự nhiên.
 
 ---
@@ -42,7 +42,7 @@ AdvancedML/
 │   ├── asr/                   # Module ASR (base, factory, phowhisper, whisper, mock, infer, evaluate)
 │   ├── enhancement/           # Module Speech Enhancement (base, factory, deepfilternet, metricgan)
 │   ├── separation/            # Module Speech Separation (base, factory, sepformer)
-│   ├── qa/                    # Module Question Answering (base, factory, qwen, mock)
+│   ├── qa/                    # Module Question Answering (base, factory, qwen, mock, infer)
 │   ├── tts/                   # Module Text-to-Speech (base, factory, vieneu, mock)
 │   ├── vad/                   # Module VAD (base, factory, silero, mock)
 │   ├── data/                  # Code chuẩn bị và tổng hợp dataset
@@ -196,6 +196,20 @@ python -m src.asr.evaluate --metadata data/samples/fleurs_vi/metadata.csv --outp
 
 ---
 
+### Module QA (Qwen2.5-1.5B-Instruct)
+
+Model mặc định là `Qwen/Qwen2.5-1.5B-Instruct`. Cấu hình riêng nằm trong `configs/qa.yaml`; khi chạy toàn bộ hệ thống, QA dùng phần `components.qa` của `configs/pipeline.yaml`. `device: auto` chọn CUDA nếu có GPU, ngược lại dùng CPU. Có thể đổi `model_id`, `max_new_tokens` và `system_prompt` trong YAML mà không sửa pipeline.
+
+Chạy QA độc lập với một câu hỏi tiếng Việt:
+
+```bash
+python -m src.qa.infer --question "Thủ đô của Hàn Quốc là gì?"
+```
+
+Mặc định câu trả lời được in dần qua `stream_answer()` và CLI báo TTFT (thời gian tới phần chữ đầu tiên) cùng thời gian sinh câu trả lời. Dùng `--no-stream` để chờ câu trả lời hoàn chỉnh, hoặc `--config path/to/qa.yaml` để thử cấu hình khác. Khi chạy pipeline, QA nhận transcript từ ASR; giao diện streaming có thể gửi từng câu/ngữ đoạn sang TTS trước khi toàn bộ câu trả lời hoàn tất.
+
+---
+
 ### Module TTS (VieNeu)
 
 Chạy riêng để nghe thử giọng và đo thời gian tới audio đầu tiên cùng RTF:
@@ -266,4 +280,4 @@ pytest -q
 1. **Tính độc lập**: Mỗi tác vụ ML là một module độc lập (có thể train, fine-tune, infer và evaluate riêng biệt).
 2. **Khử ghép nối (Decoupling)**: Pipeline tổng không gọi trực tiếp model cụ thể nào mà điều phối thông qua interface `base.py` và `factory.py`.
 3. **Cấu hình hóa qua YAML**: Mọi thay đổi về lựa chọn model, thiết bị tính toán (CPU/CUDA), checkpoint hoặc tham số đều được điều khiển qua thư mục `configs/`, không can thiệp vào mã nguồn.
-4. **Tách biệt tầng ứng dụng**: Giao diện người dùng (`app/`) chỉ tương tác với `pipeline.run(audio)`, không gọi trực tiếp các mô hình ML bên dưới.
+4. **Tách biệt tầng ứng dụng**: Giao diện người dùng (`app/`) chỉ tương tác với `pipeline.run(audio)` hoặc `pipeline.stream(audio)`, không gọi trực tiếp các mô hình ML bên dưới.
