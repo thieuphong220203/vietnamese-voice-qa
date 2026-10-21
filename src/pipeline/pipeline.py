@@ -17,12 +17,15 @@ from src.separation import SpeechSeparator, create_separator
 from src.tts import SpeechSynthesizer, create_tts
 from src.vad import VoiceActivityDetector, create_vad
 
+from time import perf_counter
+
 
 @dataclass(frozen=True, slots=True)
 class StageTrace:
     name: str
     input_count: int
     output_count: int
+    elapsed_seconds: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,28 +98,35 @@ class VoiceQAPipeline:
         return self.run(load_wav(path))
 
     def run(self, audio: AudioData) -> PipelineResult:
+        t0 = perf_counter()
         segments = tuple(self.vad.detect(audio))
+        t1 = perf_counter()
 
         separated = tuple(
             source
             for segment in segments
             for source in self.separator.separate(segment.audio)
         )
+        t2 = perf_counter()
         enhanced = tuple(self.enhancer.enhance(source) for source in separated)
+        t3 = perf_counter()
         transcript_parts = tuple(
             text for source in enhanced if (text := self.asr.transcribe(source).strip())
         )
         transcript = self.transcript_separator.join(transcript_parts)
+        t4 = perf_counter()
         answer = self.qa.answer(transcript)
+        t5 = perf_counter()
         output_audio = self.tts.synthesize(answer)
+        t6 = perf_counter()
 
         trace = (
-            StageTrace("vad", 1, len(segments)),
-            StageTrace("separation", len(segments), len(separated)),
-            StageTrace("enhancement", len(separated), len(enhanced)),
-            StageTrace("asr", len(enhanced), len(transcript_parts)),
-            StageTrace("qa", 1, 1),
-            StageTrace("tts", 1, 1),
+            StageTrace("vad", 1, len(segments), t1 - t0),
+            StageTrace("separation", len(segments), len(separated), t2 - t1),
+            StageTrace("enhancement", len(separated), len(enhanced), t3 - t2),
+            StageTrace("asr", len(enhanced), len(transcript_parts), t4 - t3),
+            StageTrace("qa", 1, 1, t5 - t4),
+            StageTrace("tts", 1, 1, t6 - t5),   
         )
         return PipelineResult(
             transcript=transcript,

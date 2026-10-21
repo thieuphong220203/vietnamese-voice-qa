@@ -16,6 +16,11 @@ TTS_REGISTRY: dict[str, Callable[..., SpeechSynthesizer]] = {
 def create_tts(config: Mapping[str, Any]) -> SpeechSynthesizer:
     name = str(config.get("name", "mock")).lower()
     params = dict(config.get("params", {}))
+    if name == "vieneu":
+        # Keep the optional model dependency out of mock-only runs.
+        from .vieneu import VieNeuSynthesizer
+
+        return VieNeuSynthesizer(**params)
     try:
         constructor = TTS_REGISTRY[name]
     except KeyError as error:

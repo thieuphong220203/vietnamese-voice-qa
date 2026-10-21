@@ -24,16 +24,21 @@ components:
       dtype: auto
 
   qa:
-    name: mock
-    params:
-      response_template: "Đây là câu trả lời giả lập cho: {question}"
+    type: qwen
+    model_id: Qwen/Qwen2.5-1.5B-Instruct
+    device: auto
+    max_new_tokens: 128
+    system_prompt: >-
+      Bạn là một trợ lý hội thoại bằng tiếng Việt.
+      Hãy trả lời chính xác, rõ ràng và ngắn gọn.
+      Không lặp lại câu hỏi của người dùng.
 
   tts:
-    name: mock
+    name: vieneu
     params:
-      sample_rate: 16000
-      seconds_per_character: 0.02
-      minimum_duration_seconds: 0.1
+      voice: Hải Đăng
+      backend: onnx
+      precision: fp32
 
 pipeline:
   transcript_separator: " "

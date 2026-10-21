@@ -1,0 +1,5 @@
+name: vieneu
+params:
+  voice: Hải Đăng
+  backend: onnx
+  precision: fp32

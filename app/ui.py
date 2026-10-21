@@ -115,7 +115,7 @@ def _to_gradio_audio(audio: AudioData) -> AudioOutput:
 
 def _trace_rows(result_trace: tuple[object, ...]) -> list[list[object]]:
     return [
-        [stage.name, stage.input_count, stage.output_count]
+        [stage.name, stage.input_count, stage.output_count, round(stage.elapsed_seconds, 3)]
         for stage in result_trace
     ]
 
@@ -228,8 +228,8 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
                 interactive=False,
             )
             trace = gr.Dataframe(
-                headers=["Stage", "Inputs", "Outputs"],
-                datatype=["str", "number", "number"],
+                headers=["Stage", "Inputs", "Outputs", "Seconds"],
+                datatype=["str", "number", "number", "number"],
                 label="Pipeline trace",
                 interactive=False,
             )

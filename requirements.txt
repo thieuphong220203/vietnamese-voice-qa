@@ -5,3 +5,4 @@ datasets>=2.14.0
 torch
 transformers
 gradio>=5.0,<7.0
+vieneu==3.8.3

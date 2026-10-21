@@ -43,7 +43,7 @@ AdvancedML/
 │   ├── enhancement/           # Module Speech Enhancement (base, factory, deepfilternet, metricgan)
 │   ├── separation/            # Module Speech Separation (base, factory, sepformer)
 │   ├── qa/                    # Module Question Answering (base, factory, qwen, mock)
-│   ├── tts/                   # Module Text-to-Speech (base, factory, viettts, mock)
+│   ├── tts/                   # Module Text-to-Speech (base, factory, vieneu, mock)
 │   ├── vad/                   # Module VAD (base, factory, silero, mock)
 │   ├── data/                  # Code chuẩn bị và tổng hợp dataset
 │   └── pipeline/              # Logic điều phối toàn bộ pipeline (pipeline.py)
@@ -196,6 +196,18 @@ python -m src.asr.evaluate --metadata data/samples/fleurs_vi/metadata.csv --outp
 
 ---
 
+### Module TTS (VieNeu)
+
+Chạy riêng để nghe thử giọng và đo thời gian tới audio đầu tiên cùng RTF:
+
+```bash
+python -m src.tts.infer --text "Thủ đô của Hàn Quốc là Seoul."
+```
+
+File kết quả mặc định: `outputs/audio/tts_sample.wav`. Có thể thêm `--output path/to/file.wav` hoặc đổi giọng trong `configs/tts.yaml`. VieNeu dùng CPU/ONNX để dành GPU cho ASR và QA.
+
+---
+
 ## 7. Hướng Dẫn Chạy Pipeline End-to-End
 
 Chạy toàn bộ luồng xử lý từ audio đầu vào đến âm thanh phản hồi:
@@ -208,7 +220,7 @@ python scripts/run_pipeline.py --input data/samples/fleurs_vi/audio/sample_000.w
 python scripts/run_pipeline.py --input data/samples/fleurs_vi/audio/sample_000.wav --output outputs/audio/response.wav
 ```
 
-Pipeline đọc cấu hình từ `configs/pipeline.yaml`. Các module đang trong quá trình phát triển sẽ tự động sử dụng component `mock` để hệ thống luôn chạy thông suốt.
+Pipeline đọc cấu hình từ `configs/pipeline.yaml`. Cấu hình hiện tại dùng PhoWhisper, Qwen và VieNeu; VAD, Separation và Enhancement vẫn dùng mock. Giao diện hiện xử lý từng lượt nói rồi mới phát audio trả lời. `stream_synthesize()` đã sẵn sàng cho giao diện streaming sau này.
 
 ---
 
