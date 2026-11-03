@@ -1,6 +1,6 @@
 version: 1
 
-# Phase 1 intentionally uses only deterministic local mock components.
+# VAD và Enhancement vẫn dùng mock; Separation dùng SepFormer.
 components:
   vad:
     name: mock
@@ -8,9 +8,12 @@ components:
       emit_speech: true
 
   separation:
-    name: mock
+    # Cấu hình chi tiết: configs/separation.yaml. Đổi về `name: mock` nếu chưa cài speechbrain.
+    name: sepformer
     params:
-      source_count: 1
+      model_id: speechbrain/sepformer-whamr16k
+      device: auto
+      output: primary   # chỉ đưa giọng to nhất (người hỏi) sang ASR
 
   enhancement:
     name: mock

@@ -27,6 +27,7 @@ def test_yaml_to_factory_to_pipeline_to_output(tmp_path: Path) -> None:
         "answer_text": "Đây là câu trả lời thử nghiệm.",
     }
     config["components"]["tts"] = {"name": "mock", "params": {}}
+    config["components"]["separation"] = {"name": "mock", "params": {"source_count": 1}}
     config_path = tmp_path / "pipeline.yaml"
     config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
     pipeline = VoiceQAPipeline.from_yaml(config_path)

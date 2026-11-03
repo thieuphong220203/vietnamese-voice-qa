@@ -220,6 +220,41 @@ python -m src.tts.infer --text "Thủ đô của Hàn Quốc là Seoul."
 
 File kết quả mặc định: `outputs/audio/tts_sample.wav`. Có thể thêm `--output path/to/file.wav` hoặc đổi giọng trong `configs/tts.yaml`. VieNeu dùng CPU/ONNX để dành GPU cho ASR và QA.
 
+### Module Speech Separation (SepFormer)
+
+Model gốc: `speechbrain/sepformer-whamr16k` (train trên tiếng Anh, 16 kHz, tách 2 người nói kể cả khi có nhiễu/vang). Trong pipeline, separator chỉ trả về **giọng to nhất** (`output: primary`), coi đó là người hỏi, để ASR không nhận lẫn lời của người nói nền. Cấu hình: `configs/separation.yaml` (chạy riêng) và `components.separation` trong `configs/pipeline.yaml`.
+
+1. **Tách một file:**
+
+```bash
+python -m src.separation.infer --audio path/to/mix.wav
+# kết quả: outputs/audio/separation/<tên>_source1.wav (giọng chính), _source2.wav
+```
+
+2. **Tạo dữ liệu trộn từ VIVOS** (chia train/valid/test theo người nói; `s1` luôn là giọng to hơn):
+
+```bash
+# VIVOS đã giải nén ở data/raw/vivos/{train,test}/waves/...
+python -m src.data.prepare_separation --vivos-root data/raw/vivos \
+    --output-dir data/processed/separation --n-train 4000 --n-valid 300 --n-test 300
+# hoặc thêm --from-hf để tải VIVOS từ Hugging Face trước
+```
+
+3. **Đánh giá** (SI-SNR/SI-SNRi theo PIT, độ chính xác chọn giọng chính, và với `--asr` là WER của PhoWhisper khi không tách / có tách / audio sạch):
+
+```bash
+python -m src.separation.evaluate --csv data/processed/separation/test.csv --tag baseline --asr
+```
+
+4. **Fine-tune trên tiếng Việt** (cần GPU — xem `notebooks/separation_colab.ipynb` để chạy trọn bộ baseline → fine-tune → so sánh trên Colab):
+
+```bash
+python -m src.separation.train --epochs 5 --segment-seconds 3 --batch-size 1 --grad-accum 4 --fp16
+python -m src.separation.evaluate --checkpoint checkpoints/separation/finetuned/best.pt --tag finetuned --asr
+```
+
+Dùng model đã fine-tune trong pipeline: thêm `checkpoint: checkpoints/separation/finetuned/best.pt` vào `params` của separation.
+
 ---
 
 ## 7. Hướng Dẫn Chạy Pipeline End-to-End
@@ -234,7 +269,7 @@ python scripts/run_pipeline.py --input data/samples/fleurs_vi/audio/sample_000.w
 python scripts/run_pipeline.py --input data/samples/fleurs_vi/audio/sample_000.wav --output outputs/audio/response.wav
 ```
 
-Pipeline đọc cấu hình từ `configs/pipeline.yaml`. Cấu hình hiện tại dùng PhoWhisper, Qwen và VieNeu; VAD, Separation và Enhancement vẫn dùng mock. Giao diện có chế độ chạy thường và streaming đầu ra: Qwen trả chữ dần, VieNeu tạo audio theo từng phần. Đầu vào vẫn cần thu âm xong rồi mới xử lý.
+Pipeline đọc cấu hình từ `configs/pipeline.yaml`. Cấu hình hiện tại dùng SepFormer, PhoWhisper, Qwen và VieNeu; VAD và Enhancement vẫn dùng mock. Giao diện có chế độ chạy thường và streaming đầu ra: Qwen trả chữ dần, VieNeu tạo audio theo từng phần. Đầu vào vẫn cần thu âm xong rồi mới xử lý.
 
 ---
 

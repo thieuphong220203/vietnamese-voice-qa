@@ -1,0 +1,9 @@
+name: sepformer
+
+params:
+  model_id: speechbrain/sepformer-whamr16k
+  device: auto
+  # Bỏ comment sau khi fine-tune để dùng trọng số tiếng Việt:
+  # checkpoint: checkpoints/separation/finetuned/best.pt
+  output: primary   # primary = chỉ giữ giọng to nhất cho ASR; all = giữ mọi giọng
+  normalize: true
