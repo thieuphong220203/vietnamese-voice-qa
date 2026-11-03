@@ -7,6 +7,7 @@ checkpoint đã fine-tune trên tiếng Việt qua tham số ``checkpoint``.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, Literal
 
@@ -123,8 +124,17 @@ class SepFormerSeparator(SpeechSeparator):
         self.target_peak = target_peak
 
         self.model = model if model is not None else load_sepformer(model_id, savedir, self.device)
+        self.checkpoint = None
         if checkpoint:
-            load_finetuned_weights(self.model, checkpoint, self.device)
+            if Path(checkpoint).exists():
+                load_finetuned_weights(self.model, checkpoint, self.device)
+                self.checkpoint = str(checkpoint)
+            else:
+                # Thành viên khác clone repo sẽ không có file .pt (bị .gitignore) -> dùng model gốc.
+                warnings.warn(
+                    f"Không thấy checkpoint {checkpoint}; dùng trọng số gốc của {model_id}.",
+                    stacklevel=2,
+                )
         self.sample_rate = model_sample_rate(self.model, model_id)
 
     def separate_array(self, mixture: np.ndarray, sample_rate: int) -> list[np.ndarray]:
@@ -174,6 +184,7 @@ class SepFormerSeparator(SpeechSeparator):
                 metadata={
                     **audio.metadata,
                     "separation_model": self.model_id,
+                    "separation_checkpoint": self.checkpoint,
                     "source_index": index,
                     "energy_rank": rank,
                 },

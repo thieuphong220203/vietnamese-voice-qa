@@ -11,7 +11,7 @@ Chỉ số:
 Ví dụ::
 
     # Baseline (model tiếng Anh gốc)
-    python -m src.separation.evaluate --csv data/processed/separation/test.csv --tag baseline --asr
+    python -m src.separation.evaluate --csv data/processed/separation/test.csv --checkpoint none --tag baseline --asr
     # Sau fine-tune
     python -m src.separation.evaluate --csv data/processed/separation/test.csv \\
         --checkpoint checkpoints/separation/finetuned/best.pt --tag finetuned --asr
@@ -42,7 +42,9 @@ def load_config(path: Path, checkpoint: str | None) -> dict[str, Any]:
     params = dict(config.get("params", {}))
     if config.get("name", "sepformer") == "sepformer":
         params["output"] = "all"  # cần mọi nguồn để tính PIT
-    if checkpoint:
+    if checkpoint and checkpoint.lower() == "none":
+        params.pop("checkpoint", None)  # ép dùng model gốc (baseline)
+    elif checkpoint:
         params["checkpoint"] = checkpoint
     return {"name": config.get("name", "sepformer"), "params": params}
 
@@ -135,7 +137,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "tag": args.tag,
         "csv": str(args.csv),
-        "checkpoint": args.checkpoint,
+        "checkpoint": getattr(separator, "checkpoint", None),
         "samples": len(results),
         "si_snr": float(np.mean([r["si_snr"] for r in results])) if results else None,
         "si_snr_mix": float(np.mean([r["si_snr_mix"] for r in results])) if results else None,
@@ -170,7 +172,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--csv", type=Path, default=Path("data/processed/separation/test.csv"))
     parser.add_argument("--config", type=Path, default=Path("configs/separation.yaml"))
-    parser.add_argument("--checkpoint", default=None, help="file .pt fine-tune (bỏ trống = model gốc)")
+    parser.add_argument("--checkpoint", default=None, help="file .pt fine-tune; 'none' = model gốc; bỏ trống = theo config")
     parser.add_argument("--tag", default="baseline", help="tên lần chạy, dùng đặt tên file kết quả")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--asr", action="store_true", help="tính thêm WER/CER bằng PhoWhisper")

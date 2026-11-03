@@ -243,7 +243,7 @@ python -m src.data.prepare_separation --vivos-root data/raw/vivos \
 3. **Đánh giá** (SI-SNR/SI-SNRi theo PIT, độ chính xác chọn giọng chính, và với `--asr` là WER của PhoWhisper khi không tách / có tách / audio sạch):
 
 ```bash
-python -m src.separation.evaluate --csv data/processed/separation/test.csv --tag baseline --asr
+python -m src.separation.evaluate --csv data/processed/separation/test.csv --checkpoint none --tag baseline --asr
 ```
 
 4. **Fine-tune trên tiếng Việt** (cần GPU — xem `notebooks/separation_colab.ipynb` để chạy trọn bộ baseline → fine-tune → so sánh trên Colab):
@@ -253,7 +253,7 @@ python -m src.separation.train --epochs 5 --segment-seconds 3 --batch-size 1 --g
 python -m src.separation.evaluate --checkpoint checkpoints/separation/finetuned/best.pt --tag finetuned --asr
 ```
 
-Dùng model đã fine-tune trong pipeline: thêm `checkpoint: checkpoints/separation/finetuned/best.pt` vào `params` của separation.
+Config đã trỏ tới `checkpoints/separation/finetuned/best.pt` (không đưa lên git vì nặng ~113 MB — xin file từ người train và đặt đúng chỗ). Thiếu file thì separator cảnh báo và tự dùng model gốc. Thêm `--checkpoint none` để ép dùng model gốc.
 
 ---
 

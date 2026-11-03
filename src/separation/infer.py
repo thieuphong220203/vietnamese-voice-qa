@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--audio", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=Path("configs/separation.yaml"))
-    parser.add_argument("--checkpoint", default=None)
+    parser.add_argument("--checkpoint", default=None, help="file .pt; 'none' = model gốc; bỏ trống = theo config")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/audio/separation"))
     return parser.parse_args()
 
@@ -33,7 +33,9 @@ def main() -> int:
     params = dict(config.get("params", {}))
     if config.get("name", "sepformer") == "sepformer":
         params["output"] = "all"
-    if args.checkpoint:
+    if args.checkpoint and args.checkpoint.lower() == "none":
+        params.pop("checkpoint", None)
+    elif args.checkpoint:
         params["checkpoint"] = args.checkpoint
     separator = create_separator({"name": config.get("name", "sepformer"), "params": params})
 

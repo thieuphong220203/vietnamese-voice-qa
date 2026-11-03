@@ -12,6 +12,7 @@ components:
     name: sepformer
     params:
       model_id: speechbrain/sepformer-whamr16k
+      checkpoint: checkpoints/separation/finetuned/best.pt   # fine-tune VIVOS; thiếu file thì dùng model gốc
       device: auto
       output: primary   # chỉ đưa giọng to nhất (người hỏi) sang ASR
 

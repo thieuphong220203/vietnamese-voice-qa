@@ -188,3 +188,11 @@ def test_download_vivos_extracts_archive_and_fetches_prompts(tmp_path: Path, mon
     assert (root / "test" / "prompts.txt").read_text(encoding="utf-8").startswith("DEV01_R000")
     paths = prepare(root, tmp_path / "sep", n_train=2, n_valid=0, n_test=2, n_valid_speakers=0, segment_seconds=1.0)
     assert set(paths) == {"train", "test"}
+
+
+def test_missing_checkpoint_falls_back_to_pretrained(tmp_path: Path) -> None:
+    with pytest.warns(UserWarning, match="Không thấy checkpoint"):
+        separator = create_separator(
+            {"name": "sepformer", "params": {"model": FakeSepformer(), "checkpoint": str(tmp_path / "nope.pt")}}
+        )
+    assert separator.checkpoint is None
