@@ -237,7 +237,7 @@ python -m src.separation.infer --audio path/to/mix.wav
 # VIVOS đã giải nén ở data/raw/vivos/{train,test}/waves/...
 python -m src.data.prepare_separation --vivos-root data/raw/vivos \
     --output-dir data/processed/separation --n-train 4000 --n-valid 300 --n-test 300
-# hoặc thêm --from-hf để tải VIVOS từ Hugging Face trước
+# hoặc thêm --download để tự tải VIVOS (~1.4 GB) trước
 ```
 
 3. **Đánh giá** (SI-SNR/SI-SNRi theo PIT, độ chính xác chọn giọng chính, và với `--asr` là WER của PhoWhisper khi không tách / có tách / audio sạch):

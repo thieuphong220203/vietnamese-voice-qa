@@ -150,3 +150,41 @@ def test_pit_loss_is_permutation_invariant() -> None:
 def test_invalid_output_mode_rejected() -> None:
     with pytest.raises(ValueError):
         create_separator({"name": "sepformer", "params": {"model": FakeSepformer(), "output": "nope"}})
+
+
+def test_download_vivos_extracts_archive_and_fetches_prompts(tmp_path: Path, monkeypatch) -> None:
+    import gzip
+    import sys
+    import tarfile
+    import types
+
+    from src.data.prepare_separation import download_vivos
+
+    # Tạo vivos.tar.gz giả (không có prompts.txt) + prompts .gz như repo trên HF
+    staging = tmp_path / "staging"
+    make_fake_vivos(staging / "vivos")
+    prompts = {split: (staging / "vivos" / split / "prompts.txt").read_text(encoding="utf-8") for split in ("train", "test")}
+    for split in prompts:
+        (staging / "vivos" / split / "prompts.txt").unlink()
+    archive = tmp_path / "vivos.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(staging / "vivos", arcname="vivos")
+    for split, text in prompts.items():
+        with gzip.open(tmp_path / f"prompts-{split}.txt.gz", "wt", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def fake_download(repo_id, filename, repo_type=None):
+        assert repo_id == "AILAB-VNUHCM/vivos" and repo_type == "dataset"
+        return str(archive if filename.endswith("vivos.tar.gz") else tmp_path / Path(filename).name)
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(hf_hub_download=fake_download))
+
+    root = tmp_path / "data" / "raw" / "vivos"
+    root.mkdir(parents=True)  # giống repo: thư mục đã tồn tại với .gitkeep
+    (root / ".gitkeep").touch()
+    download_vivos(root)
+
+    assert len(list((root / "train" / "waves").glob("*/*.wav"))) == 12
+    assert (root / "test" / "prompts.txt").read_text(encoding="utf-8").startswith("DEV01_R000")
+    paths = prepare(root, tmp_path / "sep", n_train=2, n_valid=0, n_test=2, n_valid_speakers=0, segment_seconds=1.0)
+    assert set(paths) == {"train", "test"}

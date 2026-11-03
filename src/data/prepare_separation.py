@@ -266,42 +266,87 @@ def prepare(
     return outputs
 
 
-def export_hf_vivos(output_root: Path, dataset_id: str = "AILAB-VNUHCM/vivos") -> Path:
-    """Tải VIVOS từ Hugging Face và ghi ra đúng cấu trúc thư mục gốc.
+VIVOS_HF_REPO = "AILAB-VNUHCM/vivos"
+VIVOS_HF_ARCHIVE = "data/vivos.tar.gz"  # file nén gốc nằm sẵn trong repo dataset
+VIVOS_ZENODO_URL = "https://zenodo.org/record/7068130/files/vivos.tar.gz"
 
-    Cần ``datasets`` (+ ``soundfile``/``torchcodec`` để giải mã audio) và mạng tới
-    huggingface.co. Nếu bản trên Hub không tải được, hãy tải vivos.tar.gz thủ công
-    rồi giải nén vào ``output_root``.
+
+def _safe_extract(archive: Path, destination: Path) -> None:
+    import tarfile
+
+    destination.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive) as tar:
+        root = destination.resolve()
+        for member in tar.getmembers():
+            target = (destination / member.name).resolve()
+            if root not in target.parents and target != root:
+                raise ValueError(f"đường dẫn không an toàn trong file nén: {member.name}")
+            if not (member.isfile() or member.isdir()):
+                raise ValueError(f"file nén chứa mục không phải file/thư mục: {member.name}")
+        if hasattr(tarfile, "data_filter"):  # Python >= 3.12
+            tar.extractall(destination, filter="data")
+        else:
+            tar.extractall(destination)
+
+
+def _fetch_prompts(split_dir: Path, split: str) -> None:
+    """Bổ sung prompts.txt nếu file nén không có (lấy bản .gz trong repo HF)."""
+
+    target = split_dir / "prompts.txt"
+    if target.exists():
+        return
+    import gzip
+
+    from huggingface_hub import hf_hub_download
+
+    gz_path = hf_hub_download(VIVOS_HF_REPO, f"data/prompts-{split}.txt.gz", repo_type="dataset")
+    with gzip.open(gz_path, "rt", encoding="utf-8") as handle:
+        target.write_text(handle.read(), encoding="utf-8")
+
+
+def download_vivos(vivos_root: Path) -> Path:
+    """Tải vivos.tar.gz (khoảng 1.4 GB) và giải nén thành ``vivos_root/{train,test}/waves/...``.
+
+    Thử Hugging Face trước (cần ``huggingface_hub``), lỗi thì tải từ Zenodo.
+    Không dùng ``datasets.load_dataset`` vì repo VIVOS dùng loading script,
+    ``datasets`` >= 4 không còn hỗ trợ.
     """
 
-    from datasets import load_dataset
+    if (vivos_root / "train" / "waves").is_dir() and (vivos_root / "test" / "waves").is_dir():
+        print(f"VIVOS đã có ở {vivos_root}, bỏ qua bước tải")
+    else:
+        try:
+            from huggingface_hub import hf_hub_download
+
+            archive = Path(hf_hub_download(VIVOS_HF_REPO, VIVOS_HF_ARCHIVE, repo_type="dataset"))
+        except Exception as error:  # noqa: BLE001 — chuyển sang nguồn dự phòng
+            import urllib.request
+
+            print(f"Tải từ Hugging Face lỗi ({error}); thử Zenodo...")
+            archive = vivos_root.parent / "vivos.tar.gz"
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(VIVOS_ZENODO_URL, archive)
+
+        print(f"Giải nén {archive} ...")
+        # File nén có thư mục gốc "vivos/", nên giải nén vào thư mục cha.
+        _safe_extract(archive, vivos_root.parent)
+        extracted = vivos_root.parent / "vivos"
+        if extracted.resolve() != vivos_root.resolve():
+            extracted.rename(vivos_root)
 
     for split in ("train", "test"):
-        dataset = load_dataset(dataset_id, split=split)
-        prompts = []
-        for row_index, row in enumerate(dataset):
-            audio = row["audio"]
-            if hasattr(audio, "get_all_samples"):  # datasets >= 4 (torchcodec)
-                decoded = audio.get_all_samples()
-                signal = decoded.data.numpy().mean(axis=0)
-                rate = int(decoded.sample_rate)
-            else:
-                signal = np.asarray(audio["array"], dtype=np.float32)
-                rate = int(audio["sampling_rate"])
-            speaker = str(row.get("speaker_id") or Path(row["path"]).parent.name)
-            utt_id = Path(row.get("path") or "").stem or f"{speaker}_{row_index:05d}"
-            write_wav(output_root / split / "waves" / speaker / f"{utt_id}.wav", signal, rate)
-            prompts.append(f"{utt_id} {row.get('sentence', '')}")
-        (output_root / split / "prompts.txt").write_text("\n".join(prompts) + "\n", encoding="utf-8")
-        print(f"VIVOS {split}: {len(prompts)} câu -> {output_root / split}")
-    return output_root
+        _fetch_prompts(vivos_root / split, split)
+        count = sum(1 for _ in (vivos_root / split / "waves").glob("*/*.wav"))
+        print(f"VIVOS {split}: {count} file wav")
+    return vivos_root
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--vivos-root", type=Path, default=Path("data/raw/vivos"))
     parser.add_argument("--output-dir", type=Path, default=Path("data/processed/separation"))
-    parser.add_argument("--from-hf", action="store_true", help="tải VIVOS từ Hugging Face vào --vivos-root trước")
+    parser.add_argument("--from-hf", "--download", dest="download", action="store_true",
+                        help="tải VIVOS (Hugging Face, dự phòng Zenodo) vào --vivos-root trước")
     parser.add_argument("--n-train", type=int, default=4000)
     parser.add_argument("--n-valid", type=int, default=300)
     parser.add_argument("--n-test", type=int, default=300)
@@ -315,8 +360,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if args.from_hf:
-        export_hf_vivos(args.vivos_root)
+    if args.download:
+        download_vivos(args.vivos_root)
     prepare(
         args.vivos_root,
         args.output_dir,
