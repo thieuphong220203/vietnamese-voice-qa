@@ -282,7 +282,15 @@ python -m src.enhancement.infer --audio path/to/noisy_test.wav --output outputs/
 
 `configs/pipeline.yaml` hiện bật DTLN cho stage enhancement. DTLN chạy ở 16 kHz, tự đổi sample rate đầu vào về 16 kHz rồi đổi lại sau xử lý. Model giữ mono theo chuẩn đầu vào ASR.
 
-4. Đánh giá trên manifest các cặp test sạch/nhiễu. Tạo CSV có cột `noisy,clean` (đường dẫn tương đối tính từ thư mục CSV hoặc đường dẫn tuyệt đối), rồi chạy:
+4. **Tạo dữ liệu test nhanh từ FLEURS + DEMAND noise** (tương tự như `make_test_mix.py` của Separation):
+
+```powershell
+python scripts/make_enhancement_test_mix.py
+# hoặc: python -m src.data.prepare_enhancement
+```
+Lệnh trên lấy 10 mẫu tiếng Việt sạch trong `data/samples/fleurs_vi/audio` kết hợp với các môi trường tiếng ồn thực tế của DEMAND (văn phòng OOFFICE, quán cafe PCAFE, xe hơi TCAR) ở SNR 5 dB, tạo ra `test/clean`, `test/noisy` và file `data/processed/enhancement/test.csv`.
+
+5. **Đánh giá trên manifest các cặp test sạch/nhiễu** (tính SI-SDR và STOI):
 
 ```powershell
 python -m src.enhancement.evaluate --csv data/processed/enhancement/test.csv
