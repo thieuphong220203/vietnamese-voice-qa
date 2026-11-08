@@ -126,6 +126,8 @@ def _trace_rows(result_trace: tuple[object, ...]) -> list[list[object]]:
 def run_pipeline(
     audio_input: AudioInput,
     pipeline: VoiceQAPipeline,
+    enable_enhancement: bool = True,
+    enable_separation: bool = True,
     progress: gr.Progress = gr.Progress(),
 ) -> tuple[str, str, AudioOutput, list[list[object]], str]:
     """Run one request through the already initialized pipeline."""
@@ -137,7 +139,11 @@ def run_pipeline(
         audio = _to_audio_data(audio_input)
 
         progress(0.25, desc="Đang chạy pipeline...")
-        result = pipeline.run(audio)
+        result = pipeline.run(
+            audio,
+            enable_enhancement=enable_enhancement,
+            enable_separation=enable_separation,
+        )
 
         progress(0.9, desc="Đang chuẩn bị kết quả...")
         output_audio = _to_gradio_audio(result.output_audio)
@@ -178,6 +184,8 @@ def _wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
 def run_pipeline_stream(
     audio_input: AudioInput,
     pipeline: VoiceQAPipeline,
+    enable_enhancement: bool = True,
+    enable_separation: bool = True,
 ) -> Iterator[tuple[str, str, bytes | None | object, str]]:
     started_at = time.perf_counter()
 
@@ -194,7 +202,11 @@ def run_pipeline_stream(
         transcript = ""
         answer = ""
 
-        for update in pipeline.stream(audio):
+        for update in pipeline.stream(
+            audio,
+            enable_enhancement=enable_enhancement,
+            enable_separation=enable_separation,
+        ):
             transcript = update.transcript
             answer = update.answer
 
@@ -250,11 +262,20 @@ def run_pipeline_stream(
 def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
     """Build the UI around one reusable pipeline instance."""
 
-    def submit(audio_input: AudioInput, progress: gr.Progress = gr.Progress()):
-        return run_pipeline(audio_input, pipeline, progress)
+    def submit(
+        audio_input: AudioInput,
+        enable_enhancement: bool,
+        enable_separation: bool,
+        progress: gr.Progress = gr.Progress(),
+    ):
+        return run_pipeline(
+            audio_input, pipeline, enable_enhancement, enable_separation, progress
+        )
 
-    def submit_stream(audio_input: AudioInput):
-        yield from run_pipeline_stream(audio_input, pipeline)
+    def submit_stream(audio_input: AudioInput, enable_enhancement: bool, enable_separation: bool):
+        yield from run_pipeline_stream(
+            audio_input, pipeline, enable_enhancement, enable_separation
+        )
 
     with gr.Blocks(
         title="Vietnamese Voice Assistant",
@@ -265,8 +286,8 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
                 gr.Markdown(
                     """
                     # 🎙️ Vietnamese Voice Assistant
-                    Upload hoặc thu âm tiếng Việt, sau đó chạy toàn bộ pipeline
-                    **VAD → Separation → Enhancement → ASR → QA → TTS**.
+                    Upload hoặc thu âm tiếng Việt. Bật/tắt lọc nhiễu và tách giọng
+                    để so sánh kết quả ASR; **VAD → ASR → QA → TTS** luôn hoạt động.
                     """
                 )
             with gr.Column(scale=2, min_width=140):
@@ -285,6 +306,13 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
                     sources=["upload", "microphone"],
                     type="numpy",
                     format="wav",
+                )
+
+                enable_enhancement = gr.Checkbox(
+                    label="Bật lọc nhiễu (DTLN Enhancement)", value=True
+                )
+                enable_separation = gr.Checkbox(
+                    label="Bật tách giọng (SepFormer Separation)", value=True
                 )
 
                 with gr.Row():
@@ -347,7 +375,7 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
 
         run_button.click(
             fn=submit,
-            inputs=[audio_input],
+            inputs=[audio_input, enable_enhancement, enable_separation],
             outputs=outputs,
             show_progress="full",
             concurrency_limit=1,
@@ -356,7 +384,7 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
 
         stream_button.click(
             fn=submit_stream,
-            inputs=[audio_input],
+            inputs=[audio_input, enable_enhancement, enable_separation],
             outputs=[transcript, answer, stream_audio, stream_status],
             show_progress="minimal",
             concurrency_limit=1,

@@ -125,18 +125,59 @@ class VoiceQAPipeline:
     def run_file(self, path: str | Path) -> PipelineResult:
         return self.run(load_wav(path))
 
-    def run(self, audio: AudioData) -> PipelineResult:
+    def _prepare_sources(
+        self,
+        audio: AudioData,
+        *,
+        enable_separation: bool,
+        enable_enhancement: bool,
+    ) -> tuple[
+        tuple[SpeechSegment, ...],
+        tuple[AudioData, ...],
+        tuple[AudioData, ...],
+        tuple[StageTrace, ...],
+    ]:
         t0 = perf_counter()
         segments = tuple(self.vad.detect(audio))
         t1 = perf_counter()
+        trace = [StageTrace("vad", 1, len(segments), t1 - t0)]
 
-        separated = tuple(
-            source
-            for segment in segments
-            for source in self.separator.separate(segment.audio)
+        if enable_separation:
+            separated = tuple(
+                source
+                for segment in segments
+                for source in self.separator.separate(segment.audio)
+            )
+            t2 = perf_counter()
+            trace.append(
+                StageTrace("separation", len(segments), len(separated), t2 - t1)
+            )
+        else:
+            separated = tuple(segment.audio for segment in segments)
+            t2 = t1
+
+        if enable_enhancement:
+            enhanced = tuple(self.enhancer.enhance(source) for source in separated)
+            t3 = perf_counter()
+            trace.append(
+                StageTrace("enhancement", len(separated), len(enhanced), t3 - t2)
+            )
+        else:
+            enhanced = separated
+        return segments, separated, enhanced, tuple(trace)
+
+    def run(
+        self,
+        audio: AudioData,
+        *,
+        enable_separation: bool = True,
+        enable_enhancement: bool = True,
+    ) -> PipelineResult:
+        segments, separated, enhanced, preparation_trace = self._prepare_sources(
+            audio,
+            enable_separation=enable_separation,
+            enable_enhancement=enable_enhancement,
         )
-        t2 = perf_counter()
-        enhanced = tuple(self.enhancer.enhance(source) for source in separated)
         t3 = perf_counter()
         transcript_parts = tuple(
             text for source in enhanced if (text := self.asr.transcribe(source).strip())
@@ -148,10 +189,7 @@ class VoiceQAPipeline:
         output_audio = self.tts.synthesize(answer)
         t6 = perf_counter()
 
-        trace = (
-            StageTrace("vad", 1, len(segments), t1 - t0),
-            StageTrace("separation", len(segments), len(separated), t2 - t1),
-            StageTrace("enhancement", len(separated), len(enhanced), t3 - t2),
+        trace = preparation_trace + (
             StageTrace("asr", len(enhanced), len(transcript_parts), t4 - t3),
             StageTrace("qa", 1, 1, t5 - t4),
             StageTrace("tts", 1, 1, t6 - t5),
@@ -166,16 +204,20 @@ class VoiceQAPipeline:
             trace=trace,
         )
 
-    def stream(self, audio: AudioData) -> Iterator[StreamUpdate]:
+    def stream(
+        self,
+        audio: AudioData,
+        *,
+        enable_separation: bool = True,
+        enable_enhancement: bool = True,
+    ) -> Iterator[StreamUpdate]:
         """Stream câu trả lời và audio, giữ nguyên run() cũ."""
 
-        segments = tuple(self.vad.detect(audio))
-        separated = tuple(
-            source
-            for segment in segments
-            for source in self.separator.separate(segment.audio)
+        _, _, enhanced, _ = self._prepare_sources(
+            audio,
+            enable_separation=enable_separation,
+            enable_enhancement=enable_enhancement,
         )
-        enhanced = tuple(self.enhancer.enhance(source) for source in separated)
         transcript_parts = tuple(
             text
             for source in enhanced
