@@ -4,14 +4,12 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .base import SpeechEnhancer
-from .deepfilternet import DeepFilterNetEnhancer
-from .metricgan import MetricGANEnhancer
+from .dtln import DTLNEnhancer
 from .mock import MockEnhancer
 
 ENHANCER_REGISTRY: dict[str, Callable[..., SpeechEnhancer]] = {
     "mock": MockEnhancer,
-    "deepfilternet": DeepFilterNetEnhancer,
-    "metricgan": MetricGANEnhancer,
+    "dtln": DTLNEnhancer,
 }
 
 

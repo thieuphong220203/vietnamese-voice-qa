@@ -1,0 +1,10 @@
+name: dtln
+
+params:
+  # Copy the fine-tuned file from Drive into this ignored local checkpoint path.
+  checkpoint: checkpoints/enhancement/dtln/DTLN_vi_snr5_lr1e-4_run01.weights.h5
+  # The original pretrained checkpoint ships with the upstream DTLN repository.
+  baseline_checkpoint: checkpoints/enhancement/DTLN/pretrained_model/model.h5
+  source_dir: checkpoints/enhancement/DTLN
+  sample_rate: 16000
+  device: auto

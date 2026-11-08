@@ -40,7 +40,7 @@ AdvancedML/
 ├── src/
 │   ├── audio/                 # Xử lý audio dùng chung (AudioData, loader, preprocessing)
 │   ├── asr/                   # Module ASR (base, factory, phowhisper, whisper, mock, infer, evaluate)
-│   ├── enhancement/           # Module Speech Enhancement (base, factory, deepfilternet, metricgan)
+│   ├── enhancement/           # Module Speech Enhancement (base, factory, DTLN, inference, evaluation)
 │   ├── separation/            # Module Speech Separation (base, factory, sepformer)
 │   ├── qa/                    # Module Question Answering (base, factory, qwen, mock, infer)
 │   ├── tts/                   # Module Text-to-Speech (base, factory, vieneu, mock)
@@ -81,7 +81,7 @@ Chứa toàn bộ file cấu hình định dạng YAML. Mục tiêu là thay đ�
 Chứa mã nguồn triển khai thực tế của từng tác vụ ML. Mỗi module tuân theo cấu trúc chuẩn hóa:
 - `base.py`: Interface / abstract class chung. Quy định phương thức bắt buộc mà mọi model trong module phải có (ví dụ ASR bắt buộc có `transcribe(audio)`).
 - `factory.py`: Đọc tên model từ file YAML và khởi tạo đúng class tương ứng (Factory Pattern).
-- `<model>.py`: Wrapper cho từng model cụ thể (như `phowhisper.py`, `deepfilternet.py`, `qwen.py`). Chịu trách nhiệm tải pretrained weights, chuyển đổi tensor và chạy inference.
+- `<model>.py`: Wrapper cho từng model cụ thể (như `phowhisper.py`, `dtln.py`, `qwen.py`). Chịu trách nhiệm tải weights, chuyển đổi tensor và chạy inference.
 - `mock.py`: Mô hình giả lập nhẹ dùng để test thông suốt toàn bộ hệ thống mà không cần tải model nặng hay GPU.
 - `train.py`: Logic huấn luyện / fine-tuning độc lập cho module.
 - `infer.py`: Chạy suy luận độc lập trên file âm thanh mới.
@@ -220,6 +220,85 @@ python -m src.tts.infer --text "Thủ đô của Hàn Quốc là Seoul."
 
 File kết quả mặc định: `outputs/audio/tts_sample.wav`. Có thể thêm `--output path/to/file.wav` hoặc đổi giọng trong `configs/tts.yaml`. VieNeu dùng CPU/ONNX để dành GPU cho ASR và QA.
 
+<<<<<<< Updated upstream
+=======
+### Module Speech Separation (SepFormer)
+
+Model gốc: `speechbrain/sepformer-whamr16k` (train trên tiếng Anh, 16 kHz, tách 2 người nói kể cả khi có nhiễu/vang). Trong pipeline, separator chỉ trả về **giọng to nhất** (`output: primary`), coi đó là người hỏi, để ASR không nhận lẫn lời của người nói nền. Cấu hình: `configs/separation.yaml` (chạy riêng) và `components.separation` trong `configs/pipeline.yaml`.
+
+1. **Tách một file:**
+
+```bash
+python -m src.separation.infer --audio path/to/mix.wav
+# kết quả: outputs/audio/separation/<tên>_source1.wav (giọng chính), _source2.wav
+```
+
+2. **Tạo dữ liệu trộn từ VIVOS** (chia train/valid/test theo người nói; `s1` luôn là giọng to hơn):
+
+```bash
+# VIVOS đã giải nén ở data/raw/vivos/{train,test}/waves/...
+python -m src.data.prepare_separation --vivos-root data/raw/vivos \
+    --output-dir data/processed/separation --n-train 4000 --n-valid 300 --n-test 300
+# hoặc thêm --download để tự tải VIVOS (~1.4 GB) trước
+```
+
+3. **Đánh giá** (SI-SNR/SI-SNRi theo PIT, độ chính xác chọn giọng chính, và với `--asr` là WER của PhoWhisper khi không tách / có tách / audio sạch):
+
+```bash
+python -m src.separation.evaluate --csv data/processed/separation/test.csv --checkpoint none --tag baseline --asr
+```
+
+4. **Fine-tune trên tiếng Việt** (cần GPU — xem `notebooks/separation_colab.ipynb` để chạy trọn bộ baseline → fine-tune → so sánh trên Colab):
+
+```bash
+python -m src.separation.train --epochs 5 --segment-seconds 3 --batch-size 1 --grad-accum 4 --fp16
+python -m src.separation.evaluate --checkpoint checkpoints/separation/finetuned/best.pt --tag finetuned --asr
+```
+
+Config đã trỏ tới `checkpoints/separation/finetuned/best.pt` (không đưa lên git vì nặng ~113 MB — xin file từ người train và đặt đúng chỗ). Thiếu file thì separator cảnh báo và tự dùng model gốc. Thêm `--checkpoint none` để ép dùng model gốc.
+
+### Module Speech Enhancement (DTLN)
+
+Enhancement dùng kiến trúc DTLN của `breizhn/DTLN` và checkpoint fine-tune từ `ML (2).ipynb`. Adapter tuân theo cùng mẫu như separation: `base.py` định nghĩa giao diện, `factory.py` tạo model theo YAML, `dtln.py` bọc inference, còn `infer.py` và `evaluate.py` chạy độc lập. Fine-tune vẫn thực hiện trong Colab; repo local dùng checkpoint để inference và đánh giá.
+
+1. Cài dependency DTLN trong cùng Python environment:
+
+```powershell
+python -m pip install -r requirements-dtln.txt
+```
+
+2. Tải checkpoint fine-tune từ Google Drive vào `checkpoints/enhancement/dtln/`:
+
+```text
+DTLN_vi_snr5_lr1e-4_run01.weights.h5  # fine-tuned, dùng trong pipeline
+```
+
+Notebook lưu file fine-tune ở `dtln_finetune_output/models_DTLN_vi_snr5_lr1e-4_run01/`. Model pretrained gốc nằm sẵn trong repo DTLN tại `pretrained_model/model.h5`; evaluator dùng file đó làm baseline. Mã nguồn và baseline được clone lần đầu vào `checkpoints/enhancement/DTLN/`. Không commit checkpoint; thư mục `checkpoints/` đã được `.gitignore` loại khỏi Git.
+
+3. Chạy một file thử:
+
+```powershell
+python -m src.enhancement.infer --audio path/to/noisy_test.wav --output outputs/audio/enhancement/enhanced_test.wav
+```
+
+`configs/pipeline.yaml` hiện bật DTLN cho stage enhancement. DTLN chạy ở 16 kHz, tự đổi sample rate đầu vào về 16 kHz rồi đổi lại sau xử lý. Model giữ mono theo chuẩn đầu vào ASR.
+
+4. Đánh giá trên manifest các cặp test sạch/nhiễu. Tạo CSV có cột `noisy,clean` (đường dẫn tương đối tính từ thư mục CSV hoặc đường dẫn tuyệt đối), rồi chạy:
+
+```powershell
+python -m src.enhancement.evaluate --csv data/processed/enhancement/test.csv
+```
+
+Manifest ví dụ:
+
+```csv
+id,noisy,clean
+utt_001,noisy/utt_001.wav,clean/utt_001.wav
+```
+
+Lệnh so sánh `noisy`, DTLN pretrained và fine-tuned theo SI-SDR và STOI; kết quả chi tiết và summary JSON được lưu dưới `outputs/metrics/`. Không dùng audio train/validation để lập kết quả test. Notebook trước đây có cảnh báo learning rate trong log (`0.001`) khác config (`0.0001`); cần giữ log đó làm căn cứ khi ghi learning rate trong báo cáo.
+
+>>>>>>> Stashed changes
 ---
 
 ## 7. Hướng Dẫn Chạy Pipeline End-to-End
