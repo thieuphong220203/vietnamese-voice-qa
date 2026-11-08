@@ -1,0 +1,157 @@
+"""Adapter for the fine-tuned DTLN Keras model used by the Colab notebook."""
+
+from __future__ import annotations
+
+import importlib
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+# DTLN's upstream code targets TensorFlow's bundled Keras 2 API.
+os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
+
+import numpy as np
+
+from src.audio.types import AudioData
+from src.data.wav_utils import resample_linear
+
+from .base import SpeechEnhancer
+
+DTLN_SOURCE_URL = "https://github.com/breizhn/DTLN.git"
+DTLN_INPUT_RATE = 16_000
+DTLN_PADDING = 384
+
+
+class DTLNEnhancer(SpeechEnhancer):
+    """Run DTLN on mono audio and return it in the input sample-rate format.
+
+    ``checkpoint`` must point to the fine-tuned ``.weights.h5`` file produced by
+    ``ML (2).ipynb``. The upstream DTLN source is cloned lazily into ``source_dir``
+    if it is not already there. TensorFlow and the upstream module are imported
+    only when the first audio is enhanced.
+    """
+
+    def __init__(
+        self,
+        checkpoint: str | Path = "checkpoints/enhancement/dtln/DTLN_vi_snr5_lr1e-4_run01.weights.h5",
+        baseline_checkpoint: str | Path | None = None,
+        source_dir: str | Path = "checkpoints/enhancement/DTLN",
+        sample_rate: int = DTLN_INPUT_RATE,
+        device: str = "auto",
+        model: Any = None,
+    ) -> None:
+        if sample_rate != DTLN_INPUT_RATE:
+            raise ValueError(f"DTLN expects {DTLN_INPUT_RATE} Hz audio; got {sample_rate}")
+        if device not in {"auto", "cpu", "gpu"}:
+            raise ValueError("device must be 'auto', 'cpu', or 'gpu'")
+        self.checkpoint = Path(checkpoint)
+        self.baseline_checkpoint = Path(baseline_checkpoint) if baseline_checkpoint else None
+        self.source_dir = Path(source_dir)
+        self.sample_rate = sample_rate
+        self.device = device
+        self._model = model
+        self._tf: Any = None
+
+    def _load_model(self) -> Any:
+        if self._model is not None:
+            return self._model
+
+        source_file = self.source_dir / "DTLN_model.py"
+        if not source_file.is_file():
+            self.source_dir.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                ["git", "clone", "--depth", "1", DTLN_SOURCE_URL, str(self.source_dir)],
+                check=True,
+            )
+        if not source_file.is_file():
+            raise FileNotFoundError(f"DTLN_model.py was not found under {self.source_dir}")
+
+        if not self.checkpoint.is_file():
+            raise FileNotFoundError(
+                "DTLN weights are missing. Copy the fine-tuned Colab artifact to "
+                f"{self.checkpoint}. Expected file: "
+                "DTLN_vi_snr5_lr1e-4_run01.weights.h5"
+            )
+
+        # The original DTLN implementation uses the legacy Keras 2 API.
+        try:
+            import tensorflow as tf
+        except ImportError as error:
+            raise RuntimeError(
+                "TensorFlow is required for DTLN. Install the optional dependencies "
+                "with: python -m pip install -r requirements-dtln.txt"
+            ) from error
+
+        source_path = str(self.source_dir.resolve())
+        if source_path not in sys.path:
+            sys.path.insert(0, source_path)
+        try:
+            dtln_module = importlib.import_module("DTLN_model")
+            dtln_class = dtln_module.DTLN_model
+        except (ImportError, AttributeError) as error:
+            raise RuntimeError(
+                f"Could not import DTLN_model from {self.source_dir}. "
+                "Install the DTLN dependencies (including wavinfo) and retry."
+            ) from error
+
+        has_gpu = bool(tf.config.list_physical_devices("GPU"))
+        if self.device == "gpu" and not has_gpu:
+            raise RuntimeError("DTLN device='gpu' was requested, but TensorFlow found no GPU")
+        tf_device = "/GPU:0" if self.device == "gpu" or (self.device == "auto" and has_gpu) else "/CPU:0"
+
+        with tf.device(tf_device):
+            model_wrapper = dtln_class()
+            model_wrapper.build_DTLN_model()
+            model_wrapper.model.load_weights(str(self.checkpoint))
+        self._tf = tf
+        self._model = model_wrapper.model
+        return self._model
+
+    def _enhance_mono(self, samples: np.ndarray) -> np.ndarray:
+        model = self._load_model()
+        padded = np.pad(samples.astype(np.float32, copy=False), (DTLN_PADDING, DTLN_PADDING))
+        batch = padded[np.newaxis, :]
+        if self._tf is None:
+            prediction = model.predict_on_batch(batch)
+        else:
+            has_gpu = bool(self._tf.config.list_physical_devices("GPU"))
+            tf_device = "/GPU:0" if self.device == "gpu" or (self.device == "auto" and has_gpu) else "/CPU:0"
+            with self._tf.device(tf_device):
+                prediction = model.predict_on_batch(batch)
+        prediction = np.asarray(prediction, dtype=np.float32).reshape(-1)
+        expected = len(padded)
+        if len(prediction) < expected:
+            raise RuntimeError(
+                f"DTLN returned {len(prediction)} samples; expected at least {expected}"
+            )
+        return prediction[DTLN_PADDING : DTLN_PADDING + len(samples)]
+
+    def enhance(self, audio: AudioData) -> AudioData:
+        if audio.frame_count == 0:
+            return audio
+
+        # The pipeline audio contract preserves channel layout; DTLN itself is mono.
+        interleaved = np.asarray(audio.samples, dtype=np.float32).reshape(-1, audio.channels)
+        mono = interleaved.mean(axis=1, dtype=np.float32)
+        model_input = resample_linear(mono, audio.sample_rate, self.sample_rate)
+        enhanced = self._enhance_mono(model_input)
+        if audio.sample_rate != self.sample_rate:
+            enhanced = resample_linear(enhanced, self.sample_rate, audio.sample_rate)
+
+        target_length = audio.frame_count
+        enhanced = enhanced[:target_length]
+        if len(enhanced) < target_length:
+            enhanced = np.pad(enhanced, (0, target_length - len(enhanced)))
+
+        return audio.with_samples(
+            enhanced.tolist(),
+            channels=1,
+            metadata={
+                **audio.metadata,
+                "enhancement_model": "dtln",
+                "enhancement_checkpoint": str(self.checkpoint),
+                "enhancement_sample_rate": self.sample_rate,
+            },
+        )

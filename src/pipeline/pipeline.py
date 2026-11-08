@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+
+# The configured DTLN enhancement stage uses the legacy Keras API.
+os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
+
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
