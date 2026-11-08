@@ -23,26 +23,19 @@ def pipeline() -> VoiceQAPipeline:
     })
 
 
-def test_both_buttons_receive_enabled_checkboxes(pipeline: VoiceQAPipeline) -> None:
+def test_run_button_receives_enabled_checkboxes(pipeline: VoiceQAPipeline) -> None:
     app = build_app(pipeline)
     config = app.get_config_file()
     components = {component["id"]: component for component in config["components"]}
-    concurrency_ids = []
-    for api_name in ("run_pipeline", "run_pipeline_stream"):
-        dependency = next(
-            item for item in config["dependencies"] if item.get("api_name") == api_name
-        )
-        inputs = [components[index] for index in dependency["inputs"]]
-        assert [item["type"] for item in inputs] == ["audio", "checkbox", "checkbox"]
-        assert "DTLN" in inputs[1]["props"]["label"]
-        assert "SepFormer" in inputs[2]["props"]["label"]
-        assert [item["props"]["value"] for item in inputs[1:]] == [True, True]
-        concurrency_ids.append(app.fns[dependency["id"]].concurrency_id)
-        if api_name == "run_pipeline_stream":
-            assert [components[index]["type"] for index in dependency["outputs"]][4:] == [
-                "audio", "dataframe", "markdown",
-            ]
-    assert concurrency_ids == ["voice_pipeline", "voice_pipeline"]
+    dependency = next(
+        item for item in config["dependencies"] if item.get("api_name") == "run_pipeline"
+    )
+    inputs = [components[index] for index in dependency["inputs"]]
+    assert [item["type"] for item in inputs] == ["audio", "checkbox", "checkbox"]
+    assert "DTLN" in inputs[1]["props"]["label"]
+    assert "SepFormer" in inputs[2]["props"]["label"]
+    assert [item["props"]["value"] for item in inputs[1:]] == [True, True]
+    assert app.fns[dependency["id"]].concurrency_id == "voice_pipeline"
 
 
 @pytest.mark.parametrize("enhancement,separation", [

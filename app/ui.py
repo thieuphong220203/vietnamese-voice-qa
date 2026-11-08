@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+import io
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TypeAlias
 
 import gradio as gr
 import numpy as np
+import soundfile as sf
 
 from src.audio import AudioData
 from src.pipeline import VoiceQAPipeline
-import io
-import soundfile as sf
-from collections.abc import Iterator
 
 
 AudioInput: TypeAlias = tuple[int, np.ndarray] | None
@@ -168,6 +168,7 @@ def run_pipeline(
         error_message = f"{type(error).__name__}: {error}"
         return "", "", None, [], f"❌ **{error_message}**"
 
+
 def _wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
     """Đóng gói một phần audio thành WAV để Gradio phát."""
     with io.BytesIO() as buffer:
@@ -274,6 +275,33 @@ def run_pipeline_stream(
             gr.skip(), gr.skip(), gr.skip(),
         )
 
+
+CUSTOM_CSS = """
+.app-header {
+    padding: 14px 20px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(99, 102, 241, 0.04));
+    border: 1px solid rgba(99, 102, 241, 0.18);
+    margin-bottom: 8px;
+}
+.app-header h1 {
+    margin: 0 0 6px 0 !important;
+    font-size: 1.65rem !important;
+}
+.app-header p {
+    margin: 0 !important;
+    opacity: 0.85;
+    font-size: 0.95rem;
+}
+.status-box {
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.06);
+    border: 1px solid rgba(59, 130, 246, 0.15);
+}
+"""
+
+
 def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
     """Build the UI around one reusable pipeline instance."""
 
@@ -287,26 +315,22 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
             audio_input, pipeline, enable_enhancement, enable_separation, progress
         )
 
-    def submit_stream(audio_input: AudioInput, enable_enhancement: bool, enable_separation: bool):
-        yield from run_pipeline_stream(
-            audio_input, pipeline, enable_enhancement, enable_separation
-        )
-
     with gr.Blocks(
         title="Vietnamese Voice Assistant",
         theme=gr.themes.Soft(),
+        css=CUSTOM_CSS,
     ) as app:
-        with gr.Row():
-            with gr.Column(scale=8):
+        with gr.Row(equal_height=True):
+            with gr.Column(scale=9):
                 gr.Markdown(
                     """
                     # 🎙️ Vietnamese Voice Assistant
-                    Upload hoặc thu âm tiếng Việt. Bật/tắt lọc nhiễu và tách giọng
-                    để so sánh kết quả ASR; **VAD → ASR → QA → TTS** luôn hoạt động.
-                    """
+                    Hệ thống hỏi đáp giọng nói tiếng Việt End-to-End: **VAD → SepFormer → DTLN → PhoWhisper → Qwen → VieNeu TTS**
+                    """,
+                    elem_classes=["app-header"],
                 )
-            with gr.Column(scale=2, min_width=140):
-                theme_btn = gr.Button("🌓 Giao diện Tối/Sáng", size="sm")
+            with gr.Column(scale=1, min_width=150):
+                theme_btn = gr.Button("🌓 Tối / Sáng", size="sm", variant="secondary")
                 theme_btn.click(
                     fn=None,
                     inputs=None,
@@ -314,71 +338,81 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
                     js="() => { document.body.classList.toggle('dark'); }",
                 )
 
-        with gr.Row():
-            with gr.Column(scale=1):
+        with gr.Row(equal_height=False):
+            # Cột trái: Đầu vào & Điều khiển
+            with gr.Column(scale=5):
                 audio_input = gr.Audio(
-                    label="Audio đầu vào",
+                    label="🎵 Audio đầu vào (Upload hoặc Thu âm)",
                     sources=["upload", "microphone"],
                     type="numpy",
                     format="wav",
                 )
 
-                enable_enhancement = gr.Checkbox(
-                    label="Bật lọc nhiễu (DTLN Enhancement)", value=True
-                )
-                enable_separation = gr.Checkbox(
-                    label="Bật tách giọng (SepFormer Separation)", value=True
-                )
+                with gr.Group():
+                    gr.Markdown("⚙️ **Tùy chọn tiền xử lý âm thanh**")
+                    with gr.Row():
+                        enable_enhancement = gr.Checkbox(
+                            label="Lọc nhiễu (DTLN Enhancement)",
+                            value=True,
+                        )
+                        enable_separation = gr.Checkbox(
+                            label="Tách giọng (SepFormer Separation)",
+                            value=True,
+                        )
 
                 with gr.Row():
                     run_button = gr.Button(
-                        "Chạy pipeline",
+                        "▶️ Chạy Pipeline",
                         variant="primary",
+                        size="lg",
+                        scale=2,
                     )
-
-                    stream_button = gr.Button("Chạy streaming")
-
                     clear_button = gr.ClearButton(
-                        value="Xóa kết quả",
+                        value="🗑️ Xóa kết quả",
+                        size="lg",
+                        scale=1,
                     )
-
-
 
                 status = gr.Markdown(
-                    "Sẵn sàng. Model đã được load khi app khởi động."
+                    "✨ **Trạng thái:** Sẵn sàng. Hãy tải file âm thanh hoặc thu âm trực tiếp.",
+                    elem_classes=["status-box"],
                 )
 
-            with gr.Column(scale=1):
+                examples_dir = Path("data/samples/fleurs_vi/audio")
+                if examples_dir.exists():
+                    sample_files = sorted(list(examples_dir.glob("*.wav")))[:5]
+                    if sample_files:
+                        gr.Examples(
+                            examples=[str(path) for path in sample_files],
+                            inputs=[audio_input],
+                            label="📂 Audio mẫu tiếng Việt (FLEURS)",
+                        )
+
+            # Cột phải: Kết quả đầu ra & Trace
+            with gr.Column(scale=6):
                 transcript = gr.Textbox(
-                    label="Transcript (ASR)",
-                    lines=5,
+                    label="📝 Văn bản nhận dạng (PhoWhisper ASR)",
+                    placeholder="Nội dung câu hỏi sau khi nhận dạng sẽ hiển thị tại đây...",
+                    lines=3,
                     interactive=False,
                 )
                 answer = gr.Textbox(
-                    label="Câu trả lời (QA)",
-                    lines=5,
+                    label="🤖 Câu trả lời (Qwen QA)",
+                    placeholder="Câu trả lời của trợ lý AI sẽ hiển thị tại đây...",
+                    lines=4,
                     interactive=False,
                 )
-
-        with gr.Row():
-            output_audio = gr.Audio(
-                label="Audio trả lời (TTS)",
-                interactive=False,
-            )
-
-            stream_audio = gr.Audio(
-                label="Audio streaming",
-                streaming=True,
-                autoplay=True,
-                interactive=False,
-            )
-            stream_status = gr.Markdown("")
-            trace = gr.Dataframe(
-                headers=["Stage", "Inputs", "Outputs", "Seconds"],
-                datatype=["str", "number", "number", "number"],
-                label="Pipeline trace (chạy pipeline)",
-                interactive=False,
-            )
+                output_audio = gr.Audio(
+                    label="🔊 Audio trả lời (VieNeu TTS)",
+                    autoplay=True,
+                    interactive=False,
+                )
+                trace = gr.Dataframe(
+                    headers=["Stage", "Inputs", "Outputs", "Seconds"],
+                    datatype=["str", "number", "number", "number"],
+                    label="⏱️ Thời gian xử lý từng bước (Pipeline Trace)",
+                    interactive=False,
+                )
 
         outputs = [
             transcript,
@@ -387,6 +421,8 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
             trace,
             status,
         ]
+
+        clear_button.add([audio_input, transcript, answer, output_audio, trace])
 
         run_button.click(
             fn=submit,
@@ -397,26 +433,5 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
             concurrency_id="voice_pipeline",
             api_name="run_pipeline",
         )
-
-        stream_button.click(
-            fn=submit_stream,
-            inputs=[audio_input, enable_enhancement, enable_separation],
-            outputs=[transcript, answer, stream_audio, stream_status, output_audio, trace, status],
-            show_progress="minimal",
-            concurrency_limit=1,
-            concurrency_id="voice_pipeline",
-            api_name="run_pipeline_stream",
-        )
-
-        # Mẫu âm thanh tiếng Việt có sẵn để người dùng test nhanh
-        examples_dir = Path("data/samples/fleurs_vi/audio")
-        if examples_dir.exists():
-            sample_files = sorted(list(examples_dir.glob("*.wav")))[:3]
-            if sample_files:
-                gr.Examples(
-                    examples=[str(path) for path in sample_files],
-                    inputs=[audio_input],
-                    label="Audio mẫu tiếng Việt (FLEURS)",
-                )
 
     return app
