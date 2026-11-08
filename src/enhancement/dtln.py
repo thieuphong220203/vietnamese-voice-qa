@@ -155,12 +155,14 @@ class DTLNEnhancer(SpeechEnhancer):
             with self._tf.device(tf_device):
                 prediction = model.predict_on_batch(batch)
         prediction = np.asarray(prediction, dtype=np.float32).reshape(-1)
-        expected = len(padded)
-        if len(prediction) < expected:
-            raise RuntimeError(
-                f"DTLN returned {len(prediction)} samples; expected at least {expected}"
-            )
-        return prediction[DTLN_PADDING : DTLN_PADDING + len(samples)]
+        # DTLN sử dụng STFT với hop size 128 mẫu, nên phần padding ở cuối có thể bị lệch một vài mẫu
+        # do làm tròn khung STFT. Cắt đúng đoạn tiếng nói gốc và bù padding nếu cần:
+        start = min(DTLN_PADDING, len(prediction))
+        end = min(start + len(samples), len(prediction))
+        out = prediction[start:end]
+        if len(out) < len(samples):
+            out = np.pad(out, (0, len(samples) - len(out)))
+        return out
 
     def enhance(self, audio: AudioData) -> AudioData:
         if audio.frame_count == 0:
