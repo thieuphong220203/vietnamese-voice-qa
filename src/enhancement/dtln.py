@@ -6,6 +6,7 @@ import importlib
 import os
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +36,7 @@ class DTLNEnhancer(SpeechEnhancer):
 
     def __init__(
         self,
-        checkpoint: str | Path = "checkpoints/enhancement/dtln/DTLN_vi_snr5_lr1e-4_run01.weights.h5",
+        checkpoint: str | Path | None = "checkpoints/enhancement/dtln/DTLN_vi_snr5_lr1e-4_run01.weights.h5",
         baseline_checkpoint: str | Path | None = None,
         source_dir: str | Path = "checkpoints/enhancement/DTLN",
         sample_rate: int = DTLN_INPUT_RATE,
@@ -46,13 +47,18 @@ class DTLNEnhancer(SpeechEnhancer):
             raise ValueError(f"DTLN expects {DTLN_INPUT_RATE} Hz audio; got {sample_rate}")
         if device not in {"auto", "cpu", "gpu"}:
             raise ValueError("device must be 'auto', 'cpu', or 'gpu'")
-        self.checkpoint = Path(checkpoint)
-        self.baseline_checkpoint = Path(baseline_checkpoint) if baseline_checkpoint else None
+        self.checkpoint = Path(checkpoint) if checkpoint else None
         self.source_dir = Path(source_dir)
+        self.baseline_checkpoint = (
+            Path(baseline_checkpoint)
+            if baseline_checkpoint
+            else self.source_dir / "pretrained_model" / "model.h5"
+        )
         self.sample_rate = sample_rate
         self.device = device
         self._model = model
         self._tf: Any = None
+        self.loaded_checkpoint: Path | None = None
 
     def _load_model(self) -> Any:
         if self._model is not None:
@@ -68,11 +74,23 @@ class DTLNEnhancer(SpeechEnhancer):
         if not source_file.is_file():
             raise FileNotFoundError(f"DTLN_model.py was not found under {self.source_dir}")
 
-        if not self.checkpoint.is_file():
+        # Failover logic tương tự SepFormer: ưu tiên fine-tune, fallback về pretrained gốc
+        target_checkpoint: Path | None = None
+        if self.checkpoint and self.checkpoint.is_file():
+            target_checkpoint = self.checkpoint
+        elif self.baseline_checkpoint and self.baseline_checkpoint.is_file():
+            warnings.warn(
+                f"Không thấy checkpoint fine-tune {self.checkpoint}; "
+                f"tự động dùng trọng số gốc của DTLN tại {self.baseline_checkpoint}.",
+                stacklevel=2,
+            )
+            target_checkpoint = self.baseline_checkpoint
+        else:
             raise FileNotFoundError(
-                "DTLN weights are missing. Copy the fine-tuned Colab artifact to "
-                f"{self.checkpoint}. Expected file: "
-                "DTLN_vi_snr5_lr1e-4_run01.weights.h5"
+                f"Không tìm thấy checkpoint DTLN tại {self.checkpoint} "
+                f"và không thấy baseline tại {self.baseline_checkpoint}. "
+                "Vui lòng đặt checkpoint vào checkpoints/enhancement/dtln/ "
+                "hoặc để DTLN tải pretrained model gốc."
             )
 
         # The original DTLN implementation uses the legacy Keras 2 API.
@@ -104,9 +122,10 @@ class DTLNEnhancer(SpeechEnhancer):
         with tf.device(tf_device):
             model_wrapper = dtln_class()
             model_wrapper.build_DTLN_model()
-            model_wrapper.model.load_weights(str(self.checkpoint))
+            model_wrapper.model.load_weights(str(target_checkpoint))
         self._tf = tf
         self._model = model_wrapper.model
+        self.loaded_checkpoint = target_checkpoint
         return self._model
 
     def _enhance_mono(self, samples: np.ndarray) -> np.ndarray:
@@ -151,7 +170,7 @@ class DTLNEnhancer(SpeechEnhancer):
             metadata={
                 **audio.metadata,
                 "enhancement_model": "dtln",
-                "enhancement_checkpoint": str(self.checkpoint),
+                "enhancement_checkpoint": str(self.loaded_checkpoint or self.checkpoint),
                 "enhancement_sample_rate": self.sample_rate,
             },
         )
