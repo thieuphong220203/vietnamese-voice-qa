@@ -288,7 +288,7 @@ python -m src.enhancement.infer --audio path/to/noisy_test.wav --output outputs/
 python scripts/make_enhancement_test_mix.py
 # hoặc: python -m src.data.prepare_enhancement
 ```
-Lệnh trên lấy 10 mẫu tiếng Việt sạch trong `data/samples/fleurs_vi/audio` kết hợp với các môi trường tiếng ồn thực tế của DEMAND (văn phòng OOFFICE, quán cafe PCAFE, xe hơi TCAR) ở SNR 5 dB, tạo ra `test/clean`, `test/noisy` và file `data/processed/enhancement/test.csv`.
+Lệnh trên lấy 10 mẫu tiếng Việt sạch trong `data/samples/fleurs_vi/audio` kết hợp với các môi trường tiếng ồn thực tế của DEMAND (quán cafe PCAFE, đường phố xe cộ STRAFFIC, nhà hàng đông đúc PRESTAU, xe hơi TCAR) ở SNR 5 dB, tạo ra `test/clean`, `test/noisy` và file `data/processed/enhancement/test.csv`.
 
 5. **Đánh giá trên manifest các cặp test sạch/nhiễu** (tính SI-SDR và STOI):
 

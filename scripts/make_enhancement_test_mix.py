@@ -51,8 +51,9 @@ CSV_FIELDS = (
 
 # Các môi trường tiếng ồn tiêu biểu từ DEMAND (16 kHz)
 DEMAND_ENVIRONMENTS = {
-    "OOFFICE": "https://zenodo.org/records/1227121/files/OOFFICE_16k.zip",
     "PCAFE": "https://zenodo.org/records/1227121/files/PCAFE_16k.zip",
+    "STRAFFIC": "https://zenodo.org/records/1227121/files/STRAFFIC_16k.zip",
+    "PRESTAU": "https://zenodo.org/records/1227121/files/PRESTAU_16k.zip",
     "TCAR": "https://zenodo.org/records/1227121/files/TCAR_16k.zip",
 }
 
@@ -95,50 +96,90 @@ def mix_at_snr(clean: np.ndarray, noise: np.ndarray, snr_db: float, rng: random.
 def generate_synthetic_environmental_noise(num_samples: int, noise_type: str, rng: np.random.Generator) -> np.ndarray:
     """Tạo tiếng ồn mô phỏng môi trường (hỗ trợ offline khi không có internet)."""
     white = rng.standard_normal(num_samples).astype(np.float32)
-    if noise_type == "OOFFICE":
-        # Low-pass filter mô phỏng quạt máy điều hòa và tiếng hum
-        noise = np.convolve(white, np.ones(32) / 32.0, mode="same")
+    if noise_type == "STRAFFIC":
+        # Âm trầm động cơ + mô phỏng xe cộ qua lại và lốp xe
+        low_rumble = np.convolve(white, np.ones(48) / 48.0, mode="same")
+        t = np.linspace(0, num_samples / SAMPLE_RATE, num_samples, dtype=np.float32)
+        modulation = 0.7 + 0.3 * np.sin(2 * np.pi * 0.3 * t)
+        noise = low_rumble * modulation
+    elif noise_type == "PRESTAU":
+        # Giả lập nhà hàng đông đúc: tiếng nói xì xào + tiếng dao dĩa lách cách
+        chatter = np.convolve(white, np.ones(20) / 20.0, mode="same")
+        clatter = np.zeros(num_samples, dtype=np.float32)
+        n_clatters = num_samples // (SAMPLE_RATE // 2)
+        for _ in range(n_clatters):
+            pos = rng.integers(0, max(1, num_samples - 200))
+            clatter[pos : pos + 100] = rng.uniform(-0.5, 0.5, 100)
+        noise = chatter * 0.8 + clatter * 0.2
     elif noise_type == "TCAR":
         # Rất nhiều âm trầm thấp (low-frequency engine rumble)
         noise = np.convolve(white, np.ones(64) / 64.0, mode="same")
     else:  # PCAFE / Ambient
         # Pinkish noise mô phỏng quán cafe xì xào
-        b = [0.049922035, -0.095993537, 0.050612699, -0.004408786]
-        a = [1.0, -2.494956002, 2.017265875, -0.522189400]
         noise = np.convolve(white, np.ones(16) / 16.0, mode="same")
     peak = np.max(np.abs(noise)) + 1e-12
     return (noise / peak * 0.5).astype(np.float32)
 
 
 def get_or_download_demand_noise(cache_dir: Path, env_name: str = "PCAFE") -> np.ndarray:
-    """Lấy file noise DEMAND từ cache local, tải từ Zenodo, hoặc fallback tạo mô phỏng."""
+    """Lấy file noise DEMAND từ cache local, tải từ Hugging Face, hoặc fallback tạo mô phỏng."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     target_wav = cache_dir / f"{env_name}_ch01.wav"
     if target_wav.exists():
         signal, rate = read_wav(target_wav)
         return resample_linear(signal, rate, SAMPLE_RATE)
 
-    # Thử tải từ Zenodo
+    # 1. Thử tải trực tiếp từ Hugging Face qua thư viện datasets (không bao giờ bị 403)
+    try:
+        from datasets import Features, Value, load_dataset
+        import soundfile as sf
+
+        print(f"Đang tải mẫu noise DEMAND ({env_name}) từ Hugging Face (philgzl/demand)...")
+        dataset = load_dataset(
+            "philgzl/demand",
+            split="16k",
+            streaming=True,
+            features=Features({"audio": Value("binary"), "name": Value("string")}),
+        )
+        audio_segments = []
+        for item in dataset:
+            name = item.get("name", "")
+            if env_name in name:
+                buf = io.BytesIO(item["audio"])
+                sig, rate = sf.read(buf, dtype="float32")
+                if sig.ndim > 1:
+                    sig = sig.mean(axis=1)
+                audio_segments.append(sig)
+                if len(audio_segments) >= 4:  # gom ~20 giây audio noise
+                    break
+        if audio_segments:
+            combined = np.concatenate(audio_segments).astype(np.float32)
+            write_wav(target_wav, combined, SAMPLE_RATE)
+            print(f"✅ Đã tải và lưu {env_name} thành công từ Hugging Face vào {target_wav}")
+            return combined
+    except Exception as err:
+        print(f"⚠️ Hugging Face tải không thành công ({err}). Thử nguồn tiếp theo...")
+
+    # 2. Thử tải từ Zenodo
     url = DEMAND_ENVIRONMENTS.get(env_name)
     if url:
-        print(f"Đang tải mẫu noise DEMAND ({env_name}) từ Zenodo...")
+        print(f"Đang thử tải từ Zenodo ({env_name})...")
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Wget/1.21.3 (linux-gnu)"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = resp.read()
             with zipfile.ZipFile(io.BytesIO(data)) as z:
-                # Tìm channel 1 trong zip (ch01.wav)
                 ch1_names = [n for n in z.namelist() if "ch01.wav" in n]
                 if ch1_names:
                     with z.open(ch1_names[0]) as source_file, target_wav.open("wb") as out_file:
                         out_file.write(source_file.read())
-                    print(f"✅ Đã tải và lưu {env_name} vào {target_wav}")
+                    print(f"Đã tải và lưu {env_name} vào {target_wav}")
                     signal, rate = read_wav(target_wav)
                     return resample_linear(signal, rate, SAMPLE_RATE)
         except Exception as err:
-            print(f"⚠️ Không thể tải trực tiếp từ Zenodo ({err}). Đang chuyển sang tạo noise mô phỏng {env_name}.")
+            print(f"Không thể tải trực tiếp từ Zenodo ({err}). Đang chuyển sang tạo noise mô phỏng {env_name}.")
 
-    # Fallback: sinh noise mô phỏng
+    # 3. Fallback: sinh noise mô phỏng
     np_rng = np.random.default_rng(42)
     fake_noise = generate_synthetic_environmental_noise(SAMPLE_RATE * 30, env_name, np_rng)
     write_wav(target_wav, fake_noise, SAMPLE_RATE)
@@ -243,12 +284,13 @@ def main() -> int:
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\n✅ Đã tạo thành công {len(rows)} mẫu test!")
-    print(f"📁 Manifest CSV: {csv_path}")
-    print("\n👉 Bạn có thể chạy đánh giá SI-SDR / STOI ngay bằng lệnh:")
+    print(f"\nĐã tạo thành công {len(rows)} mẫu test!")
+    print(f"Manifest CSV: {csv_path}")
+    print("\nBạn có thể chạy đánh giá SI-SDR / STOI ngay bằng lệnh:")
     print(f"   python -m src.enhancement.evaluate --csv {csv_path}")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
