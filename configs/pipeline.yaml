@@ -28,13 +28,13 @@ components:
   asr:
     name: phowhisper
     params:
-      model_id: vinai/PhoWhisper-small
+      model_id: vinai/PhoWhisper-medium
       device: auto
       dtype: auto
 
   qa:
     type: qwen
-    model_id: Qwen/Qwen2.5-1.5B-Instruct
+    model_id: Qwen/Qwen2.5-3B-Instruct
     device: auto
     max_new_tokens: 128
     system_prompt: >-

@@ -186,14 +186,14 @@ def run_pipeline_stream(
     pipeline: VoiceQAPipeline,
     enable_enhancement: bool = True,
     enable_separation: bool = True,
-) -> Iterator[tuple[str, str, bytes | None | object, str]]:
+) -> Iterator[tuple[str, str, bytes | None | object, str, object, object, object]]:
     started_at = time.perf_counter()
+
+    # Streaming dùng chung vùng kết quả với batch: xóa kết quả cũ trước khi xử lý.
+    yield "", "", None, "⏳ Đang nhận dạng và tạo câu trả lời...", None, [], ""
 
     try:
         audio = _to_audio_data(audio_input)
-
-        # Xóa kết quả audio của lượt trước.
-        yield "", "", None, "⏳ Đang nhận dạng và tạo câu trả lời..."
 
         buffered: list[np.ndarray] = []
         buffered_frames = 0
@@ -211,7 +211,10 @@ def run_pipeline_stream(
             answer = update.answer
 
             if update.audio_chunk is None:
-                yield transcript, answer, gr.skip(), "⏳ Đang tạo câu trả lời..."
+                yield (
+                    transcript, answer, gr.skip(), "⏳ Đang tạo câu trả lời...",
+                    gr.skip(), gr.skip(), gr.skip(),
+                )
                 continue
 
             chunk = update.audio_chunk
@@ -235,14 +238,20 @@ def run_pipeline_stream(
                 if first_audio_at is None:
                     first_audio_at = time.perf_counter()
 
-                yield transcript, answer, wav, "🔊 Đang phát câu trả lời..."
+                yield (
+                    transcript, answer, wav, "🔊 Đang phát câu trả lời...",
+                    gr.skip(), gr.skip(), gr.skip(),
+                )
 
         # Gửi phần audio còn lại.
         if buffered and sample_rate is not None:
             wav = _wav_bytes(np.concatenate(buffered), sample_rate)
             if first_audio_at is None:
                 first_audio_at = time.perf_counter()
-            yield transcript, answer, wav, "🔊 Đang phát câu trả lời..."
+            yield (
+                transcript, answer, wav, "🔊 Đang phát câu trả lời...",
+                gr.skip(), gr.skip(), gr.skip(),
+            )
 
         elapsed = time.perf_counter() - started_at
         if first_audio_at is None:
@@ -254,10 +263,16 @@ def run_pipeline_stream(
                 f"Audio đầu tiên sau {first_delay:.2f} giây"
             )
 
-        yield transcript, answer, gr.skip(), status
+        yield (
+            transcript, answer, gr.skip(), status,
+            gr.skip(), gr.skip(), gr.skip(),
+        )
 
     except Exception as error:
-        yield "", "", gr.skip(), f"❌ {type(error).__name__}: {error}"
+        yield (
+            "", "", gr.skip(), f"❌ {type(error).__name__}: {error}",
+            gr.skip(), gr.skip(), gr.skip(),
+        )
 
 def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
     """Build the UI around one reusable pipeline instance."""
@@ -361,7 +376,7 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
             trace = gr.Dataframe(
                 headers=["Stage", "Inputs", "Outputs", "Seconds"],
                 datatype=["str", "number", "number", "number"],
-                label="Pipeline trace",
+                label="Pipeline trace (chạy pipeline)",
                 interactive=False,
             )
 
@@ -379,15 +394,17 @@ def build_app(pipeline: VoiceQAPipeline) -> gr.Blocks:
             outputs=outputs,
             show_progress="full",
             concurrency_limit=1,
+            concurrency_id="voice_pipeline",
             api_name="run_pipeline",
         )
 
         stream_button.click(
             fn=submit_stream,
             inputs=[audio_input, enable_enhancement, enable_separation],
-            outputs=[transcript, answer, stream_audio, stream_status],
+            outputs=[transcript, answer, stream_audio, stream_status, output_audio, trace, status],
             show_progress="minimal",
             concurrency_limit=1,
+            concurrency_id="voice_pipeline",
             api_name="run_pipeline_stream",
         )
 

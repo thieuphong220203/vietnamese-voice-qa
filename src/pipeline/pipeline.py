@@ -129,8 +129,8 @@ class VoiceQAPipeline:
         self,
         audio: AudioData,
         *,
-        enable_separation: bool,
         enable_enhancement: bool,
+        enable_separation: bool,
     ) -> tuple[
         tuple[SpeechSegment, ...],
         tuple[AudioData, ...],
@@ -170,13 +170,13 @@ class VoiceQAPipeline:
         self,
         audio: AudioData,
         *,
-        enable_separation: bool = True,
         enable_enhancement: bool = True,
+        enable_separation: bool = True,
     ) -> PipelineResult:
         segments, separated, enhanced, preparation_trace = self._prepare_sources(
             audio,
-            enable_separation=enable_separation,
             enable_enhancement=enable_enhancement,
+            enable_separation=enable_separation,
         )
         t3 = perf_counter()
         transcript_parts = tuple(
@@ -208,15 +208,15 @@ class VoiceQAPipeline:
         self,
         audio: AudioData,
         *,
-        enable_separation: bool = True,
         enable_enhancement: bool = True,
+        enable_separation: bool = True,
     ) -> Iterator[StreamUpdate]:
         """Stream câu trả lời và audio, giữ nguyên run() cũ."""
 
         _, _, enhanced, _ = self._prepare_sources(
             audio,
-            enable_separation=enable_separation,
             enable_enhancement=enable_enhancement,
+            enable_separation=enable_separation,
         )
         transcript_parts = tuple(
             text

@@ -1,5 +1,7 @@
 """Check the Gradio controls and callbacks without loading real models."""
 
+from unittest.mock import Mock
+
 import numpy as np
 import pytest
 
@@ -22,8 +24,10 @@ def pipeline() -> VoiceQAPipeline:
 
 
 def test_both_buttons_receive_enabled_checkboxes(pipeline: VoiceQAPipeline) -> None:
-    config = build_app(pipeline).get_config_file()
+    app = build_app(pipeline)
+    config = app.get_config_file()
     components = {component["id"]: component for component in config["components"]}
+    concurrency_ids = []
     for api_name in ("run_pipeline", "run_pipeline_stream"):
         dependency = next(
             item for item in config["dependencies"] if item.get("api_name") == api_name
@@ -33,6 +37,12 @@ def test_both_buttons_receive_enabled_checkboxes(pipeline: VoiceQAPipeline) -> N
         assert "DTLN" in inputs[1]["props"]["label"]
         assert "SepFormer" in inputs[2]["props"]["label"]
         assert [item["props"]["value"] for item in inputs[1:]] == [True, True]
+        concurrency_ids.append(app.fns[dependency["id"]].concurrency_id)
+        if api_name == "run_pipeline_stream":
+            assert [components[index]["type"] for index in dependency["outputs"]][4:] == [
+                "audio", "dataframe", "markdown",
+            ]
+    assert concurrency_ids == ["voice_pipeline", "voice_pipeline"]
 
 
 @pytest.mark.parametrize("enhancement,separation", [
@@ -42,6 +52,7 @@ def test_callbacks_forward_both_options(
     pipeline: VoiceQAPipeline, enhancement: bool, separation: bool,
 ) -> None:
     audio = (16_000, np.zeros(160, dtype=np.float32))
+    pipeline.enhancer.enhance = Mock(wraps=pipeline.enhancer.enhance)
     transcript, answer, output, trace, status = run_pipeline(
         audio, pipeline, enhancement, separation
     )
@@ -52,8 +63,11 @@ def test_callbacks_forward_both_options(
         "vad", *(["separation"] if separation else []),
         *(["enhancement"] if enhancement else []), "asr", "qa", "tts",
     ]
+    assert pipeline.enhancer.enhance.call_count == (2 if separation else 1) * int(enhancement)
 
     updates = list(run_pipeline_stream(audio, pipeline, enhancement, separation))
+    assert updates[0][4:] == (None, [], "")  # Clear batch audio, trace, and status.
     assert updates[-1][0] == transcript
     assert updates[-1][1] == answer
     assert updates[-1][3].startswith("✅")
+    assert pipeline.enhancer.enhance.call_count == 2 * (2 if separation else 1) * int(enhancement)
