@@ -74,6 +74,15 @@ class DTLNEnhancer(SpeechEnhancer):
         if not source_file.is_file():
             raise FileNotFoundError(f"DTLN_model.py was not found under {self.source_dir}")
 
+        # Comment dòng self.model.summary() trong mã nguồn DTLN để không làm tràn màn hình log
+        try:
+            content = source_file.read_text(encoding="utf-8")
+            if "self.model.summary()" in content and not "# self.model.summary()" in content:
+                content = content.replace("self.model.summary()", "# self.model.summary()")
+                source_file.write_text(content, encoding="utf-8")
+        except Exception:
+            pass
+
         # Failover logic tương tự SepFormer: ưu tiên fine-tune, fallback về pretrained gốc
         target_checkpoint: Path | None = None
         if self.checkpoint and self.checkpoint.is_file():
@@ -136,7 +145,15 @@ class DTLNEnhancer(SpeechEnhancer):
 
         with tf.device(tf_device):
             model_wrapper = dtln_class()
-            model_wrapper.build_DTLN_model()
+            _orig_summary = getattr(getattr(tf, "keras", None), "Model", None)
+            _summary_fn = getattr(_orig_summary, "summary", None) if _orig_summary else None
+            try:
+                if _summary_fn is not None:
+                    setattr(_orig_summary, "summary", lambda *a, **kw: None)
+                model_wrapper.build_DTLN_model()
+            finally:
+                if _summary_fn is not None:
+                    setattr(_orig_summary, "summary", _summary_fn)
             model_wrapper.model.load_weights(str(target_checkpoint))
         self._tf = tf
         self._model = model_wrapper.model
