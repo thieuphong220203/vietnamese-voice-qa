@@ -53,7 +53,7 @@ CSV_FIELDS = (
 DEMAND_ENVIRONMENTS = {
     "PCAFE": "https://zenodo.org/records/1227121/files/PCAFE_16k.zip",
     "STRAFFIC": "https://zenodo.org/records/1227121/files/STRAFFIC_16k.zip",
-    "PRESTAU": "https://zenodo.org/records/1227121/files/PRESTAU_16k.zip",
+    "PRESTO": "https://zenodo.org/records/1227121/files/PRESTO_16k.zip",
     "TCAR": "https://zenodo.org/records/1227121/files/TCAR_16k.zip",
 }
 
@@ -102,7 +102,7 @@ def generate_synthetic_environmental_noise(num_samples: int, noise_type: str, rn
         t = np.linspace(0, num_samples / SAMPLE_RATE, num_samples, dtype=np.float32)
         modulation = 0.7 + 0.3 * np.sin(2 * np.pi * 0.3 * t)
         noise = low_rumble * modulation
-    elif noise_type == "PRESTAU":
+    elif noise_type == "PRESTO":
         # Giả lập nhà hàng đông đúc: tiếng nói xì xào + tiếng dao dĩa lách cách
         chatter = np.convolve(white, np.ones(20) / 20.0, mode="same")
         clatter = np.zeros(num_samples, dtype=np.float32)
@@ -155,10 +155,10 @@ def get_or_download_demand_noise(cache_dir: Path, env_name: str = "PCAFE") -> np
         if audio_segments:
             combined = np.concatenate(audio_segments).astype(np.float32)
             write_wav(target_wav, combined, SAMPLE_RATE)
-            print(f"✅ Đã tải và lưu {env_name} thành công từ Hugging Face vào {target_wav}")
+            print(f"Đã tải và lưu {env_name} thành công từ Hugging Face vào {target_wav}")
             return combined
     except Exception as err:
-        print(f"⚠️ Hugging Face tải không thành công ({err}). Thử nguồn tiếp theo...")
+        print(f"Hugging Face tải không thành công ({err}). Thử nguồn tiếp theo...")
 
     # 2. Thử tải từ Zenodo
     url = DEMAND_ENVIRONMENTS.get(env_name)
