@@ -105,7 +105,13 @@ class DTLNEnhancer(SpeechEnhancer):
         source_path = str(self.source_dir.resolve())
         if source_path not in sys.path:
             sys.path.insert(0, source_path)
+
+        # DTLN_model.py gọi tf.config.experimental.set_memory_growth() ở top-level khi import.
+        # Nếu GPU context đã khởi tạo trước đó, TF sẽ văng lỗi RuntimeError. Ta bọc an toàn khi import:
+        orig_set_growth = getattr(tf.config.experimental, "set_memory_growth", None)
         try:
+            if hasattr(tf.config, "experimental"):
+                tf.config.experimental.set_memory_growth = lambda *a, **kw: None
             dtln_module = importlib.import_module("DTLN_model")
             dtln_class = dtln_module.DTLN_model
         except (ImportError, AttributeError) as error:
@@ -113,6 +119,9 @@ class DTLNEnhancer(SpeechEnhancer):
                 f"Could not import DTLN_model from {self.source_dir}. "
                 "Install the DTLN dependencies (including wavinfo) and retry."
             ) from error
+        finally:
+            if orig_set_growth is not None:
+                tf.config.experimental.set_memory_growth = orig_set_growth
 
         has_gpu = bool(tf.config.list_physical_devices("GPU"))
         if self.device == "gpu" and not has_gpu:
