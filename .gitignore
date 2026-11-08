@@ -69,3 +69,5 @@ outputs/metrics/**
 # Hugging Face / Torch cache if downloaded locally
 .cache/
 hf_cache/
+
+AGENTS.md
