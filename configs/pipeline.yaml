@@ -28,7 +28,7 @@ components:
   asr:
     name: phowhisper
     params:
-      model_id: vinai/PhoWhisper-medium
+      model_id: vinai/PhoWhisper-small
       device: auto
       dtype: auto
 
