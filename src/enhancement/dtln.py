@@ -28,10 +28,10 @@ DTLN_PADDING = 384
 class DTLNEnhancer(SpeechEnhancer):
     """Run DTLN on mono audio and return it in the input sample-rate format.
 
-    ``checkpoint`` must point to the fine-tuned ``.weights.h5`` file produced by
-    ``ML (2).ipynb``. The upstream DTLN source is cloned lazily into ``source_dir``
-    if it is not already there. TensorFlow and the upstream module are imported
-    only when the first audio is enhanced.
+    ``checkpoint`` may point either to a legacy ``.weights.h5`` file or to a
+    complete Keras 3 ``.keras`` model. The upstream DTLN source is cloned lazily
+    only for legacy weight checkpoints. TensorFlow is imported when the first
+    audio is enhanced.
     """
 
     def __init__(
@@ -64,25 +64,6 @@ class DTLNEnhancer(SpeechEnhancer):
         if self._model is not None:
             return self._model
 
-        source_file = self.source_dir / "DTLN_model.py"
-        if not source_file.is_file():
-            self.source_dir.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(
-                ["git", "clone", "--depth", "1", DTLN_SOURCE_URL, str(self.source_dir)],
-                check=True,
-            )
-        if not source_file.is_file():
-            raise FileNotFoundError(f"DTLN_model.py was not found under {self.source_dir}")
-
-        # Khôi phục DTLN_model.py về nguyên bản nếu trước đó từng bị sửa dở
-        try:
-            content = source_file.read_text(encoding="utf-8")
-            if "print(# self.model.summary())" in content:
-                content = content.replace("print(# self.model.summary())", "print(self.model.summary())")
-                source_file.write_text(content, encoding="utf-8")
-        except Exception:
-            pass
-
         # Failover logic tương tự SepFormer: ưu tiên fine-tune, fallback về pretrained gốc
         target_checkpoint: Path | None = None
         if self.checkpoint and self.checkpoint.is_file():
@@ -111,44 +92,94 @@ class DTLNEnhancer(SpeechEnhancer):
                 "with: python -m pip install -r requirements-dtln.txt"
             ) from error
 
-        source_path = str(self.source_dir.resolve())
-        if source_path not in sys.path:
-            sys.path.insert(0, source_path)
-
-        # DTLN_model.py gọi tf.config.experimental.set_memory_growth() cả ở top-level và bên trong __init__().
-        # Khi GPU context đã được khởi tạo, TF sẽ văng lỗi RuntimeError. Bọc an toàn để bỏ qua lỗi này:
-        for cfg_obj in (getattr(tf, "config", None), getattr(getattr(tf, "config", None), "experimental", None)):
-            if cfg_obj and hasattr(cfg_obj, "set_memory_growth"):
-                _orig_fn = getattr(cfg_obj, "set_memory_growth")
-                def _make_safe(fn: Any) -> Any:
-                    def _safe_call(*args: Any, **kwargs: Any) -> Any:
-                        try:
-                            return fn(*args, **kwargs)
-                        except RuntimeError:
-                            return None
-                    return _safe_call
-                setattr(cfg_obj, "set_memory_growth", _make_safe(_orig_fn))
-
-        try:
-            dtln_module = importlib.import_module("DTLN_model")
-            dtln_class = dtln_module.DTLN_model
-        except (ImportError, AttributeError) as error:
-            raise RuntimeError(
-                f"Could not import DTLN_model from {self.source_dir}. "
-                "Install the DTLN dependencies (including wavinfo) and retry."
-            ) from error
-
         has_gpu = bool(tf.config.list_physical_devices("GPU"))
         if self.device == "gpu" and not has_gpu:
             raise RuntimeError("DTLN device='gpu' was requested, but TensorFlow found no GPU")
         tf_device = "/GPU:0" if self.device == "gpu" or (self.device == "auto" and has_gpu) else "/CPU:0"
 
         with tf.device(tf_device):
-            model_wrapper = dtln_class()
-            model_wrapper.build_DTLN_model()
-            model_wrapper.model.load_weights(str(target_checkpoint))
+            if target_checkpoint.suffix.lower() == ".keras":
+                try:
+                    import keras
+
+                    from .dtln_colab_model import (
+                        STFT,
+                        InverseFFT,
+                        InstantLayerNormalization,
+                        LogMagnitude,
+                        OverlapAdd,
+                    )
+                except ImportError as error:
+                    raise RuntimeError(
+                        "A full .keras DTLN checkpoint requires Keras 3. "
+                        "Install it with: python -m pip install 'keras>=3'."
+                    ) from error
+                custom_objects = {
+                    "STFT": STFT,
+                    "LogMagnitude": LogMagnitude,
+                    "InstantLayerNormalization": InstantLayerNormalization,
+                    "InverseFFT": InverseFFT,
+                    "OverlapAdd": OverlapAdd,
+                    "DTLN>STFT": STFT,
+                    "DTLN>LogMagnitude": LogMagnitude,
+                    "DTLN>InstantLayerNormalization": InstantLayerNormalization,
+                    "DTLN>InverseFFT": InverseFFT,
+                    "DTLN>OverlapAdd": OverlapAdd,
+                }
+                model = keras.saving.load_model(
+                    str(target_checkpoint),
+                    custom_objects=custom_objects,
+                    compile=False,
+                )
+            else:
+                source_file = self.source_dir / "DTLN_model.py"
+                if not source_file.is_file():
+                    self.source_dir.parent.mkdir(parents=True, exist_ok=True)
+                    subprocess.run(
+                        ["git", "clone", "--depth", "1", DTLN_SOURCE_URL, str(self.source_dir)],
+                        check=True,
+                    )
+                if not source_file.is_file():
+                    raise FileNotFoundError(f"DTLN_model.py was not found under {self.source_dir}")
+
+                source_path = str(self.source_dir.resolve())
+                if source_path not in sys.path:
+                    sys.path.insert(0, source_path)
+
+                # Upstream changes memory growth during import/initialization. If
+                # another framework initialized CUDA first, keep inference usable.
+                for cfg_obj in (
+                    getattr(tf, "config", None),
+                    getattr(getattr(tf, "config", None), "experimental", None),
+                ):
+                    if cfg_obj and hasattr(cfg_obj, "set_memory_growth"):
+                        original = getattr(cfg_obj, "set_memory_growth")
+
+                        def make_safe(function: Any) -> Any:
+                            def safe_call(*args: Any, **kwargs: Any) -> Any:
+                                try:
+                                    return function(*args, **kwargs)
+                                except RuntimeError:
+                                    return None
+
+                            return safe_call
+
+                        setattr(cfg_obj, "set_memory_growth", make_safe(original))
+
+                try:
+                    dtln_module = importlib.import_module("DTLN_model")
+                    dtln_class = dtln_module.DTLN_model
+                except (ImportError, AttributeError) as error:
+                    raise RuntimeError(
+                        f"Could not import DTLN_model from {self.source_dir}. "
+                        "Install the DTLN dependencies (including wavinfo) and retry."
+                    ) from error
+                model_wrapper = dtln_class()
+                model_wrapper.build_DTLN_model()
+                model_wrapper.model.load_weights(str(target_checkpoint))
+                model = model_wrapper.model
         self._tf = tf
-        self._model = model_wrapper.model
+        self._model = model
         self.loaded_checkpoint = target_checkpoint
         return self._model
 
