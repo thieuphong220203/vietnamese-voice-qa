@@ -13,17 +13,12 @@ from keras import ops
 
 @keras.saving.register_keras_serializable(package="DTLN")
 class STFT(keras.layers.Layer):
-    """Return magnitude and phase for 512-point, 128-hop STFT frames."""
+    """Return the exact framed RFFT features used by the training notebook."""
 
     def call(self, inputs):
         import tensorflow as tf
 
-        spectrum = tf.signal.stft(
-            inputs,
-            frame_length=512,
-            frame_step=128,
-            fft_length=512,
-        )
+        spectrum = tf.signal.rfft(tf.signal.frame(inputs, 512, 128))
         return tf.abs(spectrum), tf.math.angle(spectrum)
 
 
@@ -32,7 +27,7 @@ class LogMagnitude(keras.layers.Layer):
     """Stable log-magnitude feature used by the first DTLN stage."""
 
     def call(self, inputs):
-        return ops.log(ops.maximum(inputs, keras.backend.epsilon()))
+        return ops.log(inputs + 1e-7)
 
 
 @keras.saving.register_keras_serializable(package="DTLN")
@@ -70,8 +65,10 @@ class InverseFFT(keras.layers.Layer):
         import tensorflow as tf
 
         magnitude, phase = inputs
-        spectrum = tf.complex(magnitude * tf.cos(phase), magnitude * tf.sin(phase))
-        return tf.signal.irfft(spectrum, [512])
+        spectrum = tf.cast(magnitude, tf.complex64) * tf.exp(
+            tf.complex(tf.zeros_like(phase), phase)
+        )
+        return tf.signal.irfft(spectrum, fft_length=[512])
 
 
 @keras.saving.register_keras_serializable(package="DTLN")

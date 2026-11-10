@@ -185,15 +185,19 @@ class DTLNEnhancer(SpeechEnhancer):
 
     def _enhance_mono(self, samples: np.ndarray) -> np.ndarray:
         model = self._load_model()
-        padded = np.pad(samples.astype(np.float32, copy=False), (DTLN_PADDING, DTLN_PADDING))
+        samples = samples.astype(np.float32, copy=False)
+        trailing_padding = DTLN_PADDING + (-len(samples)) % 128
+        padded = np.pad(samples, (DTLN_PADDING, trailing_padding))
         batch = padded[np.newaxis, :]
-        if self._tf is None:
-            prediction = model.predict_on_batch(batch)
-        else:
+        if self._tf is not None:
             has_gpu = bool(self._tf.config.list_physical_devices("GPU"))
             tf_device = "/GPU:0" if self.device == "gpu" or (self.device == "auto" and has_gpu) else "/CPU:0"
             with self._tf.device(tf_device):
-                prediction = model.predict_on_batch(batch)
+                prediction = model(batch, training=False)
+        else:
+            prediction = model(batch, training=False)
+        if hasattr(prediction, "numpy"):
+            prediction = prediction.numpy()
         prediction = np.asarray(prediction, dtype=np.float32).reshape(-1)
         # DTLN sử dụng STFT với hop size 128 mẫu, nên phần padding ở cuối có thể bị lệch một vài mẫu
         # do làm tròn khung STFT. Cắt đúng đoạn tiếng nói gốc và bù padding nếu cần:
