@@ -4,12 +4,18 @@ Mỗi hỗn hợp chứa một người nói mục tiêu, một người nói g�
 một đoạn tạp âm môi trường.  Đầu ra dùng chung cho thí nghiệm ablation C0--C3
 (không tiền xử lý, SepFormer, DTLN, và SepFormer + DTLN).
 
+Mặc định: 120 mẫu = 5 SNR (-5, 0, 5, 10, 15 dB) x 4 SIR
+(0, 1, 3, 5 dB) x 6 mẫu. SNR tính trên tổng hai giọng / noise;
+SIR tính trên target / interferer. gain_db là bí danh của sir_db.
+
 ``--fleurs-root`` chấp nhận một trong các dạng sau:
 
 * FLEURS test được lưu bởi ``datasets.Dataset.save_to_disk``;
 * thư mục chứa parquet của split test;
 * ``metadata.csv``/``test.csv``/``test.tsv`` có cột đường dẫn audio,
-  transcript và ``speaker_id``.
+  transcript và ``speaker_id``; hoặc ``gender`` nếu dùng FLEURS v2. Với
+  FLEURS v2, script chỉ ghép hai nhãn giới tính khác nhau để chắc chắn hai
+  người nói là hai người khác nhau.
 
 Script cố ý không tải hoặc thay thế DEMAND bằng MUSAN/noise mô phỏng.  Mọi file
 noise phải tồn tại sẵn trong ``--noise-root`` để nguồn kiểm thử được kiểm soát.
@@ -51,9 +57,14 @@ CSV_FIELDS = (
     "transcript",
     "target_speaker",
     "interferer_speaker",
+    "speaker_pairing_basis",
+    "target_split",
+    "interferer_split",
     "snr_db",
+    "sir_db",
     "gain_db",
     "actual_snr_db",
+    "actual_sir_db",
     "actual_gain_db",
     "noise_type",
     "duration",
@@ -66,6 +77,8 @@ class FleursUtterance:
     speaker: str
     transcript: str
     samples: np.ndarray
+    role: str = "both"
+    split: str = ""
 
 
 @dataclass(frozen=True)
@@ -153,10 +166,14 @@ def _decode_audio(value: Any, fallback_path: str | Path | None = None) -> tuple[
 def _row_to_utterance(row: Mapping[str, Any], index: int, base_dir: Path | None = None) -> FleursUtterance:
     speaker = row.get("speaker_id", row.get("speaker", row.get("speaker_name")))
     if speaker is None or str(speaker).strip() == "":
-        raise ValueError(
-            "FLEURS metadata thiếu speaker_id; không thể chứng minh hai người nói khác nhau. "
-            "Hãy dùng split test chính thức từ google/fleurs."
-        )
+        gender = str(row.get("gender", "")).strip().lower()
+        gender = {"0": "male", "1": "female"}.get(gender, gender)
+        if gender not in {"male", "female"}:
+            raise ValueError(
+                "FLEURS metadata thiếu speaker_id và nhãn male/female; "
+                "không thể chứng minh hai người nói khác nhau."
+            )
+        speaker = f"gender:{gender}"
     transcript = row.get("transcription", row.get("transcript", row.get("text", "")))
     if not str(transcript).strip():
         raise ValueError(f"FLEURS row {index} thiếu transcript")
@@ -169,7 +186,17 @@ def _row_to_utterance(row: Mapping[str, Any], index: int, base_dir: Path | None 
     samples, rate = _decode_audio(audio_value, path_value)
     samples = resample_linear(samples, rate, SAMPLE_RATE)
     utterance_id = str(row.get("id", Path(str(path_value)).stem if path_value else index))
-    return FleursUtterance(utterance_id, str(speaker), str(transcript).strip(), samples)
+    role = str(row.get("role", "both")).strip().lower() or "both"
+    if role not in {"target", "interferer", "both"}:
+        raise ValueError(f"FLEURS row {index} có role không hợp lệ: {role}")
+    return FleursUtterance(
+        utterance_id=utterance_id,
+        speaker=str(speaker),
+        transcript=str(transcript).strip(),
+        samples=samples,
+        role=role,
+        split=str(row.get("split", "")).strip().lower(),
+    )
 
 
 def _utterances_from_dataset(dataset: Any) -> list[FleursUtterance]:
@@ -179,8 +206,8 @@ def _utterances_from_dataset(dataset: Any) -> list[FleursUtterance]:
             raise ValueError("DatasetDict FLEURS không có split test")
         dataset = dataset["test"]
 
-    if "speaker_id" not in dataset.column_names:
-        raise ValueError("FLEURS dataset thiếu cột speaker_id")
+    if "speaker_id" not in dataset.column_names and "gender" not in dataset.column_names:
+        raise ValueError("FLEURS dataset thiếu cả speaker_id lẫn gender")
     if "audio" in dataset.column_names:
         try:
             from datasets import Audio
@@ -201,7 +228,7 @@ def _load_tabular_metadata(metadata_path: Path) -> list[FleursUtterance]:
 
 
 def load_fleurs_test(fleurs_root: Path) -> list[FleursUtterance]:
-    """Nạp split test FLEURS và bắt buộc giữ speaker_id thật."""
+    """Nạp FLEURS test; ưu tiên speaker_id, fallback an toàn bằng giới tính."""
 
     root = fleurs_root.resolve()
     if not root.exists():
@@ -234,9 +261,17 @@ def load_fleurs_test(fleurs_root: Path) -> list[FleursUtterance]:
             utterances = _utterances_from_dataset(dataset)
 
     speakers = {utterance.speaker for utterance in utterances}
-    if len(speakers) < 2:
-        raise ValueError(f"FLEURS test cần ít nhất 2 speaker, chỉ tìm thấy {len(speakers)}")
-    print(f"FLEURS test: {len(utterances)} câu, {len(speakers)} speaker")
+    target_speakers = {u.speaker for u in utterances if u.role in {"target", "both"}}
+    interferer_speakers = {u.speaker for u in utterances if u.role in {"interferer", "both"}}
+    if not any(target != interferer for target in target_speakers for interferer in interferer_speakers):
+        raise ValueError("FLEURS metadata không có cặp target/interferer khác người nói")
+    if all(speaker.startswith("gender:") for speaker in speakers):
+        print(
+            f"FLEURS test: {len(utterances)} câu; FLEURS v2 không có speaker_id, "
+            "sẽ chỉ ghép cặp khác giới"
+        )
+    else:
+        print(f"FLEURS test: {len(utterances)} câu, {len(speakers)} speaker")
     return utterances
 
 
@@ -321,8 +356,10 @@ def make_integrated_mixture(
 ) -> IntegratedMix:
     """Trộn hai giọng và noise, rồi nhân cùng một hệ số để chống clipping."""
 
-    if not 0.0 <= gain_db <= 5.0:
-        raise ValueError("gain_db phải nằm trong [0, 5]")
+    if not math.isfinite(gain_db) or gain_db < 0:
+        raise ValueError("gain_db (SIR) phải hữu hạn và >= 0")
+    if not math.isfinite(requested_snr_db):
+        raise ValueError("SNR phải hữu hạn")
     target = _mono_float32(target)
     interferer = _mono_float32(interferer)
     length = max(len(target), len(interferer))
@@ -370,6 +407,7 @@ def validate_dataset(
     *,
     expected_count: int,
     expected_snr_levels: Sequence[float],
+    expected_sir_levels: Sequence[float] = (0.0, 1.0, 3.0, 5.0),
     tolerance_db: float = 0.15,
 ) -> list[dict[str, str]]:
     """Đọc lại WAV đã ghi và xác nhận cân bằng, mức trộn và tính toàn vẹn."""
@@ -385,6 +423,11 @@ def validate_dataset(
     expected_levels = Counter({round(float(level), 6): per_level for level in expected_snr_levels})
     if observed_levels != expected_levels:
         raise AssertionError(f"phân bố SNR sai: {dict(observed_levels)} != {dict(expected_levels)}")
+
+    expected_pairs = Counter(build_schedule(expected_count, expected_snr_levels, expected_sir_levels))
+    observed_pairs = Counter((float(row["snr_db"]), float(row["sir_db"])) for row in rows)
+    if observed_pairs != expected_pairs:
+        raise AssertionError("phân bố tổ hợp SNR x SIR không cân bằng hoặc sai mức")
 
     for row in rows:
         if row["target_speaker"] == row["interferer_speaker"]:
@@ -415,6 +458,10 @@ def validate_dataset(
         measured_snr = snr_db(
             signals["target_path"] + signals["interferer_path"], signals["noise_path"]
         )
+        if float(row["sir_db"]) != float(row["gain_db"]):
+            raise AssertionError(f"{row['id']}: sir_db và gain_db không khớp")
+        if abs(measured_gain - float(row["actual_sir_db"])) > tolerance_db:
+            raise AssertionError(f"{row['id']}: actual_sir_db sai")
         if abs(measured_gain - float(row["gain_db"])) > tolerance_db:
             raise AssertionError(f"{row['id']}: gain thực tế sai ({measured_gain:.3f} dB)")
         if abs(measured_snr - float(row["snr_db"])) > tolerance_db:
@@ -423,6 +470,13 @@ def validate_dataset(
 
 
 def print_summary(rows: Iterable[Mapping[str, str]]) -> None:
+    rows = list(rows)
+    pairs = Counter((float(row["snr_db"]), float(row["sir_db"])) for row in rows)
+    print("\nSố mẫu theo SNR x SIR (dB)")
+    sir_levels = sorted({sir for _, sir in pairs})
+    print("SNR / SIR" + "".join(f"{sir:>8g}" for sir in sir_levels))
+    for snr in sorted({snr for snr, _ in pairs}):
+        print(f"{snr:>9g}" + "".join(f"{pairs[snr, sir]:>8}" for sir in sir_levels))
     counts = Counter((float(row["snr_db"]), row["noise_type"]) for row in rows)
     print("\nTóm tắt theo SNR và loại nhiễu")
     print(f"{'SNR (dB)':>8}  {'Loại nhiễu':<24}  {'Số mẫu':>7}")
@@ -431,22 +485,34 @@ def print_summary(rows: Iterable[Mapping[str, str]]) -> None:
         print(f"{level:>8.1f}  {noise_type:<24}  {count:>7}")
 
 
+def build_schedule(count: int, snr_levels: Sequence[float], sir_levels: Sequence[float]) -> list[tuple[float, float]]:
+    """Lưới đầy đủ, cùng số mẫu ở mỗi tổ hợp; RNG chỉ xáo trộn thứ tự."""
+    if count <= 0:
+        raise ValueError("count phải > 0")
+    for name, levels in (("SNR", snr_levels), ("SIR", sir_levels)):
+        if not levels or len(set(levels)) != len(levels) or not all(math.isfinite(x) for x in levels):
+            raise ValueError(f"{name}: các mức phải hữu hạn, khác nhau và không rỗng")
+    if any(level < 0 for level in sir_levels):
+        raise ValueError("SIR phải >= 0")
+    combinations = len(snr_levels) * len(sir_levels)
+    if count % combinations:
+        raise ValueError("count phải chia hết cho số tổ hợp SNR x SIR")
+    return [(snr, sir) for snr in snr_levels for sir in sir_levels for _ in range(count // combinations)]
+
+
 def generate_dataset(
     *,
     fleurs_root: Path,
     noise_root: Path,
     output_dir: Path,
-    count: int = 60,
-    snr_levels: Sequence[float] = (0.0, 5.0, 10.0),
+    count: int = 120,
+    snr_levels: Sequence[float] = (-5.0, 0.0, 5.0, 10.0, 15.0),
+    sir_levels: Sequence[float] = (0.0, 1.0, 3.0, 5.0),
     seed: int = 42,
 ) -> Path:
-    if count <= 0:
-        raise ValueError("count phải > 0")
     levels = tuple(float(level) for level in snr_levels)
-    if not levels or len(set(levels)) != len(levels):
-        raise ValueError("snr-levels phải khác nhau và không được rỗng")
-    if count % len(levels):
-        raise ValueError("count phải chia hết cho số mức SNR để phân bố cân bằng")
+    sir_levels = tuple(float(level) for level in sir_levels)
+    schedule = build_schedule(count, levels, sir_levels)
 
     destination = output_dir.resolve()
     if destination.exists():
@@ -454,13 +520,23 @@ def generate_dataset(
 
     utterances = load_fleurs_test(fleurs_root)
     noise_recordings = discover_demand_noise(noise_root)
-    groups: dict[str, list[FleursUtterance]] = {}
+    target_groups: dict[str, list[FleursUtterance]] = {}
+    interferer_groups: dict[str, list[FleursUtterance]] = {}
     for utterance in utterances:
-        groups.setdefault(utterance.speaker, []).append(utterance)
-    speakers = sorted(groups)
+        if utterance.role in {"target", "both"}:
+            target_groups.setdefault(utterance.speaker, []).append(utterance)
+        if utterance.role in {"interferer", "both"}:
+            interferer_groups.setdefault(utterance.speaker, []).append(utterance)
+    speaker_pairs = [
+        (target, interferer)
+        for target in sorted(target_groups)
+        for interferer in sorted(interferer_groups)
+        if target != interferer
+    ]
+    if not speaker_pairs:
+        raise ValueError("không có cặp target/interferer khác người nói")
 
     rng = random.Random(seed)
-    schedule = [level for level in levels for _ in range(count // len(levels))]
     rng.shuffle(schedule)
     noise_cache: dict[Path, np.ndarray] = {}
 
@@ -472,11 +548,10 @@ def generate_dataset(
             (staging / folder).mkdir(parents=True, exist_ok=True)
 
         rows: list[dict[str, str]] = []
-        for index, requested_snr in enumerate(schedule):
-            target_speaker, interferer_speaker = rng.sample(speakers, 2)
-            target_utt = rng.choice(groups[target_speaker])
-            interferer_utt = rng.choice(groups[interferer_speaker])
-            gain = rng.uniform(0.0, 5.0)
+        for index, (requested_snr, gain) in enumerate(schedule):
+            target_speaker, interferer_speaker = rng.choice(speaker_pairs)
+            target_utt = rng.choice(target_groups[target_speaker])
+            interferer_utt = rng.choice(interferer_groups[interferer_speaker])
             noise_recording = rng.choice(noise_recordings)
             if noise_recording.path not in noise_cache:
                 noise_cache[noise_recording.path] = load_audio_16k(noise_recording.path)
@@ -509,9 +584,19 @@ def generate_dataset(
                     "transcript": target_utt.transcript,
                     "target_speaker": target_speaker,
                     "interferer_speaker": interferer_speaker,
-                    "snr_db": f"{requested_snr:.1f}",
-                    "gain_db": f"{gain:.4f}",
+                    "speaker_pairing_basis": (
+                        "opposite_gender"
+                        if target_speaker.startswith("gender:")
+                        and interferer_speaker.startswith("gender:")
+                        else "speaker_id"
+                    ),
+                    "target_split": target_utt.split,
+                    "interferer_split": interferer_utt.split,
+                    "snr_db": str(requested_snr),
+                    "sir_db": str(gain),
+                    "gain_db": str(gain),
                     "actual_snr_db": f"{result.actual_snr_db:.4f}",
+                    "actual_sir_db": f"{result.actual_gain_db:.4f}",
                     "actual_gain_db": f"{result.actual_gain_db:.4f}",
                     "noise_type": noise_recording.noise_type,
                     "duration": f"{len(result.mix) / SAMPLE_RATE:.4f}",
@@ -519,7 +604,7 @@ def generate_dataset(
             )
             print(
                 f"[{index + 1:02d}/{count}] {sample_id}: SNR {requested_snr:.1f}/{result.actual_snr_db:.2f} dB, "
-                f"gain {gain:.2f}/{result.actual_gain_db:.2f} dB, {noise_recording.noise_type}"
+                f"SIR {gain:.2f}/{result.actual_gain_db:.2f} dB, {noise_recording.noise_type}"
             )
 
         metadata_path = staging / "metadata.csv"
@@ -532,6 +617,7 @@ def generate_dataset(
             staging,
             expected_count=count,
             expected_snr_levels=levels,
+            expected_sir_levels=sir_levels,
         )
         print_summary(validated_rows)
         staging.rename(destination)
@@ -545,10 +631,11 @@ def generate_dataset(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--count", "-count", type=int, default=60)
-    parser.add_argument("--snr-levels", type=float, nargs="+", default=(0.0, 5.0, 10.0))
+    parser.add_argument("--count", "-count", type=int, default=120)
+    parser.add_argument("--snr-levels", type=float, nargs="+", default=(-5.0, 0.0, 5.0, 10.0, 15.0))
+    parser.add_argument("--sir-levels", type=float, nargs="+", default=(0.0, 1.0, 3.0, 5.0))
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--fleurs-root", type=Path, default=PROJECT_ROOT / "data/raw/fleurs")
+    parser.add_argument("--fleurs-root", type=Path, default=PROJECT_ROOT / "data/raw/fleurs_vi_test")
     parser.add_argument("--noise-root", type=Path, default=PROJECT_ROOT / "data/raw/demand")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "data/processed/integrated_test")
     return parser.parse_args()
@@ -566,6 +653,7 @@ def main() -> int:
         output_dir=args.output_dir,
         count=args.count,
         snr_levels=args.snr_levels,
+        sir_levels=args.sir_levels,
         seed=args.seed,
     )
     return 0

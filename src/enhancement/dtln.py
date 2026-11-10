@@ -36,7 +36,7 @@ class DTLNEnhancer(SpeechEnhancer):
 
     def __init__(
         self,
-        checkpoint: str | Path | None = "checkpoints/enhancement/dtln/DTLN_vi_snr5_lr1e-4_run01.weights.h5",
+        checkpoint: str | Path | None = "checkpoints/enhancement/finetuned/DTLN_vi_snr5_lr1e-4_run01.weights.h5",
         baseline_checkpoint: str | Path | None = None,
         source_dir: str | Path = "checkpoints/enhancement/DTLN",
         sample_rate: int = DTLN_INPUT_RATE,
@@ -98,7 +98,7 @@ class DTLNEnhancer(SpeechEnhancer):
             raise FileNotFoundError(
                 f"Không tìm thấy checkpoint DTLN tại {self.checkpoint} "
                 f"và không thấy baseline tại {self.baseline_checkpoint}. "
-                "Vui lòng đặt checkpoint vào checkpoints/enhancement/dtln/ "
+                "Vui lòng đặt checkpoint vào checkpoints/enhancement/finetuned/ "
                 "hoặc để DTLN tải pretrained model gốc."
             )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
 import random
 from pathlib import Path
 
@@ -9,6 +10,8 @@ import pytest
 
 from scripts.make_integrated_test_mix import (
     SAMPLE_RATE,
+    build_schedule,
+    _row_to_utterance,
     generate_dataset,
     level_difference_db,
     make_integrated_mixture,
@@ -23,20 +26,22 @@ def tone(frequency: float, seconds: float = 0.25, amplitude: float = 0.4) -> np.
     return (amplitude * np.sin(2.0 * np.pi * frequency * time)).astype(np.float32)
 
 
-def test_integrated_mixture_hits_requested_gain_and_snr_without_clipping() -> None:
+@pytest.mark.parametrize("sir", [0, 1, 3, 5])
+@pytest.mark.parametrize("snr", [-5, 0, 5, 10, 15])
+def test_integrated_mixture_hits_requested_gain_and_snr_without_clipping(sir: float, snr: float) -> None:
     result = make_integrated_mixture(
         tone(220, 0.25),
         tone(410, 0.18),
         np.random.default_rng(7).standard_normal(SAMPLE_RATE).astype(np.float32),
-        gain_db=3.25,
-        requested_snr_db=5.0,
+        gain_db=sir,
+        requested_snr_db=snr,
         rng=random.Random(9),
     )
 
-    assert result.actual_gain_db == pytest.approx(3.25, abs=1e-3)
-    assert result.actual_snr_db == pytest.approx(5.0, abs=1e-3)
-    assert level_difference_db(result.target, result.interferer) == pytest.approx(3.25, abs=1e-3)
-    assert snr_db(result.target + result.interferer, result.noise) == pytest.approx(5.0, abs=1e-3)
+    assert result.actual_gain_db == pytest.approx(sir, abs=1e-3)
+    assert result.actual_snr_db == pytest.approx(snr, abs=1e-3)
+    assert level_difference_db(result.target, result.interferer) == pytest.approx(sir, abs=1e-3)
+    assert snr_db(result.target + result.interferer, result.noise) == pytest.approx(snr, abs=1e-3)
     assert np.allclose(result.mix, result.target + result.interferer + result.noise, atol=1e-6)
     assert max(float(np.max(np.abs(signal))) for signal in (result.mix, result.target, result.interferer, result.noise)) <= 0.95 + 1e-6
 
@@ -54,6 +59,8 @@ def _make_fake_fleurs(root: Path) -> None:
                     "audio_path": f"audio/{path.name}",
                     "transcription": f"câu thử nghiệm {speaker_index} {utterance_index}",
                     "speaker_id": f"spk{speaker_index}",
+                    "role": "target" if speaker_index < 2 else "interferer",
+                    "split": "test" if speaker_index < 2 else "train",
                 }
             )
     root.mkdir(parents=True, exist_ok=True)
@@ -75,20 +82,19 @@ def test_generate_dataset_balances_snr_validates_audio_and_refuses_overwrite(tmp
         fleurs_root=fleurs_root,
         noise_root=noise_root,
         output_dir=output_dir,
-        count=60,
-        snr_levels=(0.0, 5.0, 10.0),
         seed=42,
     )
     with metadata.open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
 
-    assert len(rows) == 60
-    assert {level: sum(float(row["snr_db"]) == level for row in rows) for level in (0.0, 5.0, 10.0)} == {
-        0.0: 20,
-        5.0: 20,
-        10.0: 20,
+    assert len(rows) == 120
+    assert Counter((float(row["snr_db"]), float(row["sir_db"])) for row in rows) == {
+        (snr, sir): 6 for snr in (-5, 0, 5, 10, 15) for sir in (0, 1, 3, 5)
     }
+    assert all(row["gain_db"] == row["sir_db"] for row in rows)
     assert all(row["target_speaker"] != row["interferer_speaker"] for row in rows)
+    assert all(row["target_split"] == "test" for row in rows)
+    assert all(row["interferer_split"] == "train" for row in rows)
     for row in rows:
         mix, rate = read_wav(output_dir / row["mix_path"])
         assert rate == SAMPLE_RATE and mix.size and np.all(np.isfinite(mix))
@@ -105,6 +111,16 @@ def test_generate_dataset_balances_snr_validates_audio_and_refuses_overwrite(tmp
         )
 
 
+@pytest.mark.parametrize("count,snrs,sirs", [
+    (119, [-5, 0, 5, 10, 15], [0, 1, 3, 5]),
+    (120, [], [0]), (120, [0], [1, 1]),
+    (120, [float("nan")], [0]), (120, [0], [-1]),
+])
+def test_invalid_grid_rejected(count, snrs, sirs) -> None:
+    with pytest.raises(ValueError):
+        build_schedule(count, snrs, sirs)
+
+
 def test_signal_rms_rejects_no_information_only_through_mixer() -> None:
     assert signal_rms(np.zeros(10, dtype=np.float32)) == 0.0
     with pytest.raises(ValueError, match="im lặng"):
@@ -116,4 +132,22 @@ def test_signal_rms_rejects_no_information_only_through_mixer() -> None:
             requested_snr_db=0.0,
             rng=random.Random(0),
         )
+
+
+def test_fleurs_v2_gender_is_used_only_as_explicit_pairing_group(tmp_path: Path) -> None:
+    path = tmp_path / "sample.wav"
+    write_wav(path, tone(220), SAMPLE_RATE)
+
+    utterance = _row_to_utterance(
+        {
+            "id": "sample",
+            "audio_path": str(path),
+            "transcription": "câu kiểm thử",
+            "speaker_id": "",
+            "gender": "female",
+        },
+        0,
+    )
+
+    assert utterance.speaker == "gender:female"
 
