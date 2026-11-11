@@ -19,7 +19,7 @@ components:
   enhancement:
     name: dtln
     params:
-      checkpoint: checkpoints/enhancement/dtln/DTLN_vi_snr5_lr1e-4_run01.weights.h5
+      checkpoint: checkpoints/enhancement/dtln/dtln_finetuned_best.keras
       baseline_checkpoint: checkpoints/enhancement/DTLN/pretrained_model/model.h5
       source_dir: checkpoints/enhancement/DTLN
       sample_rate: 16000
